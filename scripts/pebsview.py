@@ -146,6 +146,7 @@ def readPebsDumpV2(filename):
 	ts_prev = 0
 	ts_start = 0
 	accesses = None
+	accs_dict = {"Timestamp" : [], "Vaddr": []}
 	nr_accesses = 0
 
 	with open(filename, mode='rb') as file:
@@ -192,17 +193,20 @@ def readPebsDumpV2(filename):
 
 					records.append(np.array(addr))
 					tss.append(ts)
-					new_accs_dict = {"Timestamp" : [ts - ts_start] * nelem, "Vaddr": list(np.array(addr))}
-					new_accs_df = pd.DataFrame(new_accs_dict)
-					if accesses is None:
-					    accesses = new_accs_df
-					else:
-					    accesses = accesses.append(new_accs_df, ignore_index = True)
+					accs_dict["Timestamp"] += ([ts -ts_start] * nelem)
+					accs_dict["Vaddr"] += list(np.array(addr))
+					#new_accs_dict = {"Timestamp" : [ts - ts_start] * nelem, "Vaddr": list(np.array(addr))}
+					#new_accs_df = pd.DataFrame(new_accs_dict)
+					#if accesses is None:
+					#    accesses = new_accs_df
+					#else:
+					#    accesses = accesses.append(new_accs_df, ignore_index = True)
 					nr_accesses += nelem
 
 				elif (elem == None):
 					break
 
+	accesses = pd.DataFrame(accs_dict)
 	print("There were {} memory accesses.".format(nr_accesses))
 	return tss, mmaps, munmaps, records, accesses
 
@@ -607,7 +611,7 @@ if __name__ == '__main__':
 	tss, mmaps, munmaps, records, accesses = readPebsDumpV2(args.file)
 	print("Saving to: {} ...".format("{}.feather".format(args.file)))
 	accesses.to_feather("{}.feather".format(args.file))
-	pp = pprint.PrettyPrinter(indent=4)
+	#pp = pprint.PrettyPrinter(indent=4)
 	#pp.pprint(accesses)
 	sys.exit(0)
 
