@@ -99,9 +99,9 @@ def main():
     vhex = np.vectorize(hex)
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--input", type=str, required=True,
-        default="in.feather",
-        help=("Feather format pandas input file."))
-    parser.add_argument("-o", "--output", type=str, required=True,
+        action='append',
+        help=("Feather format pandas memory access trace input file(s)."))
+    parser.add_argument("-o", "--output", type=str, required=False,
         default="out.pdf",
         help=("Output file name."))
     parser.add_argument('-S', '--start-timestamp', required=False,
@@ -125,6 +125,12 @@ def main():
     parser.add_argument('--interval-distance', required=False,
         type=int, help='Max number of pages between accesses that belong to the same interval.')
 
+    parser.add_argument('--compare', default=False, action='store_true', help="Compare two traces.")
+    parser.add_argument('--compare-window', required=False, default=50,
+        type=int, help='Comparison window length.')
+    parser.add_argument('--compare-window-unit', required=False, default="ms",
+        help='Comparison window length unit (accesses or ms).')
+
     parser.add_argument('--detect-clusters', default=False, action='store_true')
     parser.add_argument('--nr-clusters', required=False,
         type=int, help='Number of clusters to use.')
@@ -141,16 +147,87 @@ def main():
     #sns.set_theme()
     sns.set_style("whitegrid")
 
-    print("Loading from {}...".format(args.input))
-    data = pd.read_feather(args.input)
+    print("Loading from {}...".format(args.input[0]))
+    data = pd.read_feather(args.input[0])
 
     # Handle time window
     #data = data.set_index("Nodes")
     data["Timestamp"] = data["Timestamp"].div(args.cpu_cycles_per_ms)
-    print("Loaded {} accesses between {} and {} msecs".format(
+    print("Loaded {} accesses between {} and {} msecs from {}".format(
         len(data),
         data["Timestamp"].iloc[0],
-        data["Timestamp"].iloc[-1]))
+        data["Timestamp"].iloc[-1],
+        args.input[0]))
+
+    if len(args.input) > 1:
+        print("Loading from {}...".format(args.input[1]))
+        data2 = pd.read_feather(args.input[1])
+        data2["Timestamp"] = data2["Timestamp"].div(args.cpu_cycles_per_ms)
+        print("Loaded {} accesses between {} and {} msecs from {}".format(
+            len(data2),
+            data2["Timestamp"].iloc[0],
+            data2["Timestamp"].iloc[-1],
+            args.input[1]))
+
+    # Traces comparison
+    if args.compare:
+        PAGE_SIZE = 4096
+        if len(args.input) < 2:
+            print("error: you must specify two traces when comparing..")
+            sys.exit(-1)
+
+        i = 0
+        i2 = 0
+        i_prev = 0
+        t_start = 0
+        t_start2 = 0
+
+        while i < len(data) and i2 < len(data2):
+            pages = {}
+            pages2 = {}
+            if args.compare_window_unit == "ms":
+                while (data["Timestamp"].iloc[i] - t_start) < args.compare_window:
+                    pages[int(data["Vaddr"].iloc[i] / PAGE_SIZE)] = None
+                    i = i + 1
+
+                while (data2["Timestamp"].iloc[i2] - t_start2) < args.compare_window:
+                    pages2[int(data2["Vaddr"].iloc[i2] / PAGE_SIZE)] = None
+                    i2 = i2 + 1
+            else:
+                while (i - i_prev) < args.compare_window:
+                    pages[int(data["Vaddr"].iloc[i] / PAGE_SIZE)] = None
+                    i = i + 1
+
+                while (i2 - i_prev) < args.compare_window:
+                    pages2[int(data2["Vaddr"].iloc[i2] / PAGE_SIZE)] = None
+                    i2 = i2 + 1
+
+
+            nr_overlap = 0
+            nr_total = 0
+            for page in pages.keys():
+                if page in pages2:
+                    nr_overlap += 1
+                nr_total += 1
+
+
+            print("[{}, {}]: ".format(t_start, data["Timestamp"].iloc[i]))
+            #print(pages)
+
+            print("[{}, {}]: ".format(t_start2, data2["Timestamp"].iloc[i2]))
+            #print(pages2)
+
+            print("overlap: {}".format(float(nr_overlap) / nr_total))
+
+            t_start = data["Timestamp"].iloc[i]
+            t_start2 = data2["Timestamp"].iloc[i2]
+            i_prev = i
+
+            if data["Timestamp"].iloc[i] > 5000:
+                sys.exit(0)
+
+
+
     if (args.start_timestamp is not None and
         args.end_timestamp is not None):
 
