@@ -52,31 +52,34 @@ def plot_to_file(data, output):
 
 
 
-def plot_to_file_init(nr_rows, height_ratios):
+def plot_to_file_init(nr_rows, height_ratios, msecs):
     global fig
     global axes
 
+    if nr_rows == 0:
+        return
+
     print("Initializing plot for {} subplots...".format(nr_rows))
-    fig, axes = plt.subplots(nr_rows, 1, figsize=(10, 10), sharex=True,
+    fig, axes = plt.subplots(nr_rows, 1, figsize=(4 + int(2 * msecs / 1000), 10), sharex=True,
         gridspec_kw = {'height_ratios': height_ratios})
     if nr_rows == 1:
         axes = [axes]
     
 
-def plot_to_file_add_subplot(row, data, interval_len):
+def plot_to_file_add_subplot(row, data, interval_len, msecs_total):
     global fig
     global axes
-    print("Generating subplot for row {}...".format(row))
+    #print("Generating subplot for row {}...".format(row))
 
     sns.histplot(ax=axes[row], data=data, x="Timestamp", y="Vaddr", bins=150);
     #ax.set_yscale('log')
     #fig, ax = plt.subplots()
     #ax.bar(data[0], data[1], color='green')
     #ax.set_xlabel('Duration')
-    axes[row].set_xlabel('time (msec)', size=16)
     #plt.locator_params(axis="x", nbins=1000)
     #axes[row].set_ylabel('vaddr ({})'.format(int(interval_len / 4096)), size=16)
     axes[row].set_ylabel('{}'.format(int(interval_len / 4096)), size=16)
+    axes[row].set_xlabel('Time (msecs) [{} msecs]'.format(int(msecs_total)), size=16)
     #plt.ylim(fom_min - 0.0025, fom_max + 0.0025)
 
     fmt = ticker.FuncFormatter(to_hex)
@@ -118,6 +121,9 @@ def main():
         type=auto_int,
         help='High virtual address.')
 
+    parser.add_argument('--phase', required=False, type=int,
+        help='Application phase.')
+
     parser.add_argument('--range', action='append', required=False,
         help='Virtual range(s) to process (format: start_addr-end_addr).')
 
@@ -153,8 +159,9 @@ def main():
     # Handle time window
     #data = data.set_index("Nodes")
     data["Timestamp"] = data["Timestamp"].div(args.cpu_cycles_per_ms)
-    print("Loaded {} accesses between {} and {} msecs from {}".format(
+    print("Loaded {} accesses ({} phases) between {} and {} msecs from {}".format(
         len(data),
+        data["Phase"].iloc[-1],
         data["Timestamp"].iloc[0],
         data["Timestamp"].iloc[-1],
         args.input[0]))
@@ -179,6 +186,7 @@ def main():
         i = 0
         i2 = 0
         i_prev = 0
+        i2_prev = 0
         t_start = 0
         t_start2 = 0
 
@@ -211,10 +219,10 @@ def main():
                 nr_total += 1
 
 
-            print("[{}, {}]: ".format(t_start, data["Timestamp"].iloc[i]))
+            print("[{}, {}]: {} of accesses".format(t_start, data["Timestamp"].iloc[i], i - i_prev))
             #print(pages)
 
-            print("[{}, {}]: ".format(t_start2, data2["Timestamp"].iloc[i2]))
+            print("[{}, {}]: {} of accesses".format(t_start2, data2["Timestamp"].iloc[i2], i2 - i2_prev))
             #print(pages2)
 
             print("overlap: {}".format(float(nr_overlap) / nr_total))
@@ -222,9 +230,25 @@ def main():
             t_start = data["Timestamp"].iloc[i]
             t_start2 = data2["Timestamp"].iloc[i2]
             i_prev = i
+            i2_prev = i2
 
             if data["Timestamp"].iloc[i] > 5000:
                 sys.exit(0)
+
+
+    if (args.phase is not None):
+        if (args.phase > data["Phase"].iloc[-1]):
+            print("error: phase requested..")
+            sys.exit(-1)
+
+        data = data[data["Phase"] == int(args.phase)]
+        if len(data) == 0:
+            print("error: no data available in phase {}".format(args.phase))
+            sys.exit(-1)
+
+        print("Using {} accesses in phase {}, time window between {} and {} ({}) msecs".format(
+            len(data), args.phase, data["Timestamp"].iloc[0], data["Timestamp"].iloc[-1],
+                data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0]))
 
 
 
@@ -367,7 +391,7 @@ def main():
                 nr_valid_intervals += 1
                 height_ratios.insert(0, high_vaddr - low_vaddr)
 
-            plot_to_file_init(nr_valid_intervals, height_ratios)
+            plot_to_file_init(nr_valid_intervals, height_ratios, (data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0]))
 
         ind = 1
         for interval in sorted(intervals):
@@ -386,12 +410,20 @@ def main():
                 len(plotdata)))
 
             if args.plot:
-                plot_to_file_add_subplot(nr_valid_intervals - ind, plotdata, high_vaddr - low_vaddr)
+                plot_to_file_add_subplot(nr_valid_intervals - ind,
+                        plotdata, high_vaddr - low_vaddr,
+                        (data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0]))
             ind += 1
 
-        if args.plot:
-            outfile = args.input
-            outfile = "{}-{}-{}".format(outfile, args.start_timestamp, args.end_timestamp)
+        if args.plot and nr_valid_intervals > 0:
+            outfile = args.input[0]
+
+            if (args.start_timestamp is not None and
+                args.end_timestamp is not None):
+                outfile = "{}-{}-{}".format(outfile, args.start_timestamp, args.end_timestamp)
+
+            if args.phase is not None:
+                outfile = "{}-phase-{}".format(outfile, args.phase)
             outfile = "{}-intervals.pdf".format(outfile)
             plot_to_file_finalize(outfile)
 
@@ -407,7 +439,13 @@ def main():
             args.high_vaddr is not None):
             outfile = "{}-{}-{}".format(outfile, '0x%x' % args.low_vaddr, '0x%x' % args.high_vaddr)
 
-        outfile = "{}-{}-{}".format(outfile, args.start_timestamp, args.end_timestamp)
+        if (args.start_timestamp is not None and
+            args.end_timestamp is not None):
+            outfile = "{}-{}-{}".format(outfile, args.start_timestamp, args.end_timestamp)
+
+        if args.phase is not None:
+            outfile = "{}-phase-{}".format(outfile, args.phase)
+
         outfile = "{}.pdf".format(outfile)
 
         plot_to_file(data, outfile)

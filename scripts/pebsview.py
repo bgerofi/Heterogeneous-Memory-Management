@@ -140,14 +140,16 @@ def readPebsDumpV2(filename):
 	records = []
 	tss = []
 	watermark=0xffffffffffffffff
+	phasemark=0xfffffffffffffffe
 
 	mmaps = []
 	munmaps = []
 	ts_prev = 0
 	ts_start = 0
 	accesses = None
-	accs_dict = {"Timestamp" : [], "Vaddr": []}
+	accs_dict = {"Timestamp" : [], "Vaddr": [], "Phase": []}
 	nr_accesses = 0
+	phase = 0
 
 	with open(filename, mode='rb') as file:
 		err = 0
@@ -194,6 +196,7 @@ def readPebsDumpV2(filename):
 					records.append(np.array(addr))
 					tss.append(ts)
 					accs_dict["Timestamp"] += ([ts -ts_start] * nelem)
+					accs_dict["Phase"] += ([phase] * nelem)
 					accs_dict["Vaddr"] += list(np.array(addr))
 					#new_accs_dict = {"Timestamp" : [ts - ts_start] * nelem, "Vaddr": list(np.array(addr))}
 					#new_accs_df = pd.DataFrame(new_accs_dict)
@@ -203,6 +206,8 @@ def readPebsDumpV2(filename):
 					#    accesses = accesses.append(new_accs_df, ignore_index = True)
 					nr_accesses += nelem
 
+				elif (elem == phasemark):
+					phase += 1
 				elif (elem == None):
 					break
 
