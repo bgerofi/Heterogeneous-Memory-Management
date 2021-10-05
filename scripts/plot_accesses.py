@@ -121,8 +121,10 @@ def main():
         type=auto_int,
         help='High virtual address.')
 
+    parser.add_argument('--phases', default=False, action='store_true',
+        help='Print a summary of each application phase.')
     parser.add_argument('--phase', required=False, type=int,
-        help='Application phase.')
+        help='Specify application phase.')
 
     parser.add_argument('--range', action='append', required=False,
         help='Virtual range(s) to process (format: start_addr-end_addr).')
@@ -235,6 +237,21 @@ def main():
             if data["Timestamp"].iloc[i] > 5000:
                 sys.exit(0)
 
+    if args.phases:
+        for p in range(data["Phase"].iloc[-1]):
+            __data = data[data["Phase"] == p]
+            if len(__data) == 0:
+                continue
+
+            print("Phase {}: {} accesses between {} and {} ({}) msecs, retired instructions: {}".format(
+                        p,
+                        len(__data),
+                        int(__data["Timestamp"].iloc[0]),
+                        int(__data["Timestamp"].iloc[-1]),
+                        int(__data["Timestamp"].iloc[-1] - __data["Timestamp"].iloc[0]),
+                        __data["Instrs"].iloc[-1]))
+        sys.exit(0)
+
 
     if (args.phase is not None):
         if (args.phase > data["Phase"].iloc[-1]):
@@ -246,9 +263,9 @@ def main():
             print("error: no data available in phase {}".format(args.phase))
             sys.exit(-1)
 
-        print("Using {} accesses in phase {}, time window between {} and {} ({}) msecs".format(
+        print("Using {} accesses in phase {}, time window between {} and {} ({}) msecs, retired instructions: {}".format(
             len(data), args.phase, data["Timestamp"].iloc[0], data["Timestamp"].iloc[-1],
-                data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0]))
+                data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0], data["Instrs"].iloc[-1]))
 
 
 

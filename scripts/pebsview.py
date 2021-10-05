@@ -20,6 +20,7 @@ from multiprocessing import Pool, cpu_count
 import pprint
 
 import pandas as pd
+import os
 
 SVG_WIDTH = "100cm"
 SVG_HEIGHT = "100cm"
@@ -147,9 +148,10 @@ def readPebsDumpV2(filename):
 	ts_prev = 0
 	ts_start = 0
 	accesses = None
-	accs_dict = {"Timestamp" : [], "Vaddr": [], "Phase": []}
+	accs_dict = {"Timestamp" : [], "Vaddr": [], "Phase": [], "Instrs": []}
 	nr_accesses = 0
 	phase = 0
+	instrs = 0
 
 	with open(filename, mode='rb') as file:
 		err = 0
@@ -179,6 +181,7 @@ def readPebsDumpV2(filename):
 						break
 					if ts_start == 0:
 					    ts_start = ts
+					instrs = getl(file.read(es), es)
 					nelem = getl(file.read(es), es)
 					if nelem == None:
 						err = 1
@@ -197,6 +200,7 @@ def readPebsDumpV2(filename):
 					tss.append(ts)
 					accs_dict["Timestamp"] += ([ts -ts_start] * nelem)
 					accs_dict["Phase"] += ([phase] * nelem)
+					accs_dict["Instrs"] += ([instrs] * nelem)
 					accs_dict["Vaddr"] += list(np.array(addr))
 					#new_accs_dict = {"Timestamp" : [ts - ts_start] * nelem, "Vaddr": list(np.array(addr))}
 					#new_accs_df = pd.DataFrame(new_accs_dict)
@@ -614,8 +618,8 @@ if __name__ == '__main__':
 
 	print("Processing: {} ...".format(args.file))
 	tss, mmaps, munmaps, records, accesses = readPebsDumpV2(args.file)
-	print("Saving to: {} ...".format("{}.feather".format(args.file)))
-	accesses.to_feather("{}.feather".format(args.file))
+	print("Saving to: {} ...".format(os.path.splitext(args.file)[0] + ".feather"))
+	accesses.to_feather(os.path.splitext(args.file)[0] + ".feather")
 	#pp = pprint.PrettyPrinter(indent=4)
 	#pp.pprint(accesses)
 	sys.exit(0)
