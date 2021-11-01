@@ -14,6 +14,7 @@ import importlib
 
 fig = None
 axes = None
+args = None
 
 def to_hex(x, pos):
     return '0x%x' % int(x)
@@ -97,8 +98,77 @@ def plot_to_file_finalize(output):
     importlib.reload(sns)
 
 
+def detect_intervals(data):
+    intervals = IntervalTree()
+
+    if args.interval_distance is None:
+        print("error: you must specify --interval-distance when detecting intervals")
+        sys.exit(-1)
+
+    print("Detecting address intervals...")
+    vaddrlist = data["Vaddr"].tolist()
+    for i in range(0, len(vaddrlist)):
+        vaddr = vaddrlist[i]
+        low_vaddr = vaddr - (args.interval_distance * 4096)
+        high_vaddr = vaddr + (args.interval_distance * 4096)
+        intervals[low_vaddr:high_vaddr] = None
+        intervals.merge_overlaps()
+
+    nr_valid_intervals = 0
+    height_ratios = []
+    if args.plot:
+        for interval in sorted(intervals):
+            low_vaddr = interval.begin
+            high_vaddr = interval.end
+            plotdata = data.copy()
+            plotdata = plotdata[plotdata["Vaddr"] >= low_vaddr]
+            plotdata = plotdata[plotdata["Vaddr"] <= high_vaddr]
+            if len(plotdata) < args.min_accesses:
+                continue
+
+            nr_valid_intervals += 1
+            height_ratios.insert(0, high_vaddr - low_vaddr)
+
+        plot_to_file_init(nr_valid_intervals, height_ratios, (data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0]))
+
+    ind = 1
+    for interval in sorted(intervals):
+        low_vaddr = interval.begin
+        high_vaddr = interval.end
+        plotdata = data.copy()
+        plotdata = plotdata[plotdata["Vaddr"] >= low_vaddr]
+        plotdata = plotdata[plotdata["Vaddr"] <= high_vaddr]
+        if len(plotdata) < args.min_accesses:
+            continue
+
+        print("Virtual range: {} - {} ({} pages), nr accesses: {}".format(
+            '0x%x' % interval.begin,
+            '0x%x' % interval.end,
+            (interval.end - interval.begin) / 4096,
+            len(plotdata)))
+
+        if args.plot:
+            plot_to_file_add_subplot(nr_valid_intervals - ind,
+                    plotdata, high_vaddr - low_vaddr,
+                    (data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0]))
+        ind += 1
+
+    if args.plot and nr_valid_intervals > 0:
+        outfile = args.input[0]
+
+        if (args.start_timestamp is not None and
+            args.end_timestamp is not None):
+            outfile = "{}-{}-{}".format(outfile, args.start_timestamp, args.end_timestamp)
+
+        if args.phase is not None:
+            outfile = "{}-phase-{}".format(outfile, args.phase)
+        outfile = "{}-intervals.pdf".format(outfile)
+        plot_to_file_finalize(outfile)
+
 
 def main():
+    global args
+
     vhex = np.vectorize(hex)
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--input", type=str, required=True,
@@ -213,29 +283,6 @@ def main():
                 args.input[1], len(data2), args.phase, data2["Timestamp"].iloc[0], data2["Timestamp"].iloc[-1],
                     data2["Timestamp"].iloc[-1] - data2["Timestamp"].iloc[0], data2["Instrs"].iloc[-1]))
 
-
-        '''
-        phdata = []
-        instrs = []
-        durations = []
-        nr_accesses = []
-
-        phdata.append(data[data["Phase"] == int(args.phase)])
-        phdata.append(data2[data2["Phase"] == int(args.phase)])
-
-        for i in range(len(phdata)):
-            instrs.append(phdata[i]["Instrs"].iloc[-1])
-            durations.append(phdata[i]["Timestamp"].iloc[-1] - phdata[i]["Timestamp"].iloc[0])
-            nr_accesses.append(len(phdata[i]))
-
-            print("{}: {} accesses in phase {}, time window between {} and {} ({}) msecs, retired instructions: {}".format(
-                args.input[i], len(phdata[i]), args.phase, phdata[i]["Timestamp"].iloc[0], phdata[i]["Timestamp"].iloc[-1],
-                    phdata[i]["Timestamp"].iloc[-1] - phdata[i]["Timestamp"].iloc[0], phdata[i]["Instrs"].iloc[-1]))
-
-        print(instrs)
-        print(durations)
-        print(nr_accesses)
-        '''
 
         i = 0
         i2 = 0
@@ -430,7 +477,6 @@ def main():
     #print(data)
     #print(data["Vaddr"].to_numpy())
 
-    intervals = IntervalTree()
     plotdatas = {}
 
     # K-Means based clustering
@@ -511,69 +557,7 @@ def main():
 
     # Interval tree based VM ranges
     if args.detect_intervals:
-        if args.interval_distance is None:
-            print("error: you must specify --interval-distance when detecting intervals")
-            sys.exit(-1)
-
-        print("Detecting address intervals...")
-        vaddrlist = data["Vaddr"].tolist()
-        for i in range(0, len(vaddrlist)):
-            vaddr = vaddrlist[i]
-            low_vaddr = vaddr - (args.interval_distance * 4096)
-            high_vaddr = vaddr + (args.interval_distance * 4096)
-            intervals[low_vaddr:high_vaddr] = None
-            intervals.merge_overlaps()
-
-        nr_valid_intervals = 0
-        height_ratios = []
-        if args.plot:
-            for interval in sorted(intervals):
-                low_vaddr = interval.begin
-                high_vaddr = interval.end
-                plotdata = data.copy()
-                plotdata = plotdata[plotdata["Vaddr"] >= low_vaddr]
-                plotdata = plotdata[plotdata["Vaddr"] <= high_vaddr]
-                if len(plotdata) < args.min_accesses:
-                    continue
-
-                nr_valid_intervals += 1
-                height_ratios.insert(0, high_vaddr - low_vaddr)
-
-            plot_to_file_init(nr_valid_intervals, height_ratios, (data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0]))
-
-        ind = 1
-        for interval in sorted(intervals):
-            low_vaddr = interval.begin
-            high_vaddr = interval.end
-            plotdata = data.copy()
-            plotdata = plotdata[plotdata["Vaddr"] >= low_vaddr]
-            plotdata = plotdata[plotdata["Vaddr"] <= high_vaddr]
-            if len(plotdata) < args.min_accesses:
-                continue
-
-            print("Virtual range: {} - {} ({} pages), nr accesses: {}".format(
-                '0x%x' % interval.begin,
-                '0x%x' % interval.end,
-                (interval.end - interval.begin) / 4096,
-                len(plotdata)))
-
-            if args.plot:
-                plot_to_file_add_subplot(nr_valid_intervals - ind,
-                        plotdata, high_vaddr - low_vaddr,
-                        (data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0]))
-            ind += 1
-
-        if args.plot and nr_valid_intervals > 0:
-            outfile = args.input[0]
-
-            if (args.start_timestamp is not None and
-                args.end_timestamp is not None):
-                outfile = "{}-{}-{}".format(outfile, args.start_timestamp, args.end_timestamp)
-
-            if args.phase is not None:
-                outfile = "{}-phase-{}".format(outfile, args.phase)
-            outfile = "{}-intervals.pdf".format(outfile)
-            plot_to_file_finalize(outfile)
+        detect_intervals(data)
 
         sys.exit(0)
 
