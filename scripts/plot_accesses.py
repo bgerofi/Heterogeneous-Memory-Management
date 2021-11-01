@@ -125,19 +125,25 @@ def main():
         help='Print a summary of each application phase.')
     parser.add_argument('--phase', required=False, type=int,
         help='Specify application phase.')
+    parser.add_argument('--phase-window', required=False, default=None,
+        type=float, help='Phase iteration window length (msecs).')
+    parser.add_argument('--phase-steps', required=False, default=None,
+        type=int, help='Phase iteration steps number.')
+    parser.add_argument('--compare-phase', required=False, action='store_true',
+        help='Compare a phase between two logs.')
 
     parser.add_argument('--range', action='append', required=False,
         help='Virtual range(s) to process (format: start_addr-end_addr).')
 
     parser.add_argument('--detect-intervals', default=False, action='store_true')
-    parser.add_argument('--interval-distance', required=False,
+    parser.add_argument('--interval-distance', required=False, default="512",
         type=int, help='Max number of pages between accesses that belong to the same interval.')
 
     parser.add_argument('--compare', default=False, action='store_true', help="Compare two traces.")
     parser.add_argument('--compare-window', required=False, default=50,
         type=int, help='Comparison window length.')
     parser.add_argument('--compare-window-unit', required=False, default="ms",
-        help='Comparison window length unit (accesses or ms).')
+        help='Comparison window length unit (accesses, ms or instrs).')
 
     parser.add_argument('--detect-clusters', default=False, action='store_true')
     parser.add_argument('--nr-clusters', required=False,
@@ -148,12 +154,15 @@ def main():
         type=int, help='Cluster width in number of pages (4kB sized).')
 
     parser.add_argument('--plot', default=False, action='store_true', help="Generate plots.")
-    parser.add_argument('--min-accesses', required=False, default=100,
+    parser.add_argument('--min-accesses', required=False, default=50,
         type=int, help='Minimum number of accesses in a cluster/interval to plot.')
     args = parser.parse_args()
 
     #sns.set_theme()
     sns.set_style("whitegrid")
+
+    data = None
+    data2 = None
 
     print("Loading from {}...".format(args.input[0]))
     data = pd.read_feather(args.input[0])
@@ -178,37 +187,117 @@ def main():
             data2["Timestamp"].iloc[-1],
             args.input[1]))
 
+    if args.compare_phase:
+        sys.exit(0)
+
+
     # Traces comparison
     if args.compare:
-        PAGE_SIZE = 4096
+        PAGE_SIZE = 32768
+        PAGE_SIZE = 65536
         if len(args.input) < 2:
             print("error: you must specify two traces when comparing..")
             sys.exit(-1)
+
+        if data2 is None:
+            print("error: you must specify two input files for comparison")
+            sys.exit(-1)
+
+        if args.phase is not None:
+            data = data[data["Phase"] == int(args.phase)]
+            data2 = data2[data2["Phase"] == int(args.phase)]
+            print("{}: {} accesses in phase {}, time window between {} and {} ({}) msecs, retired instructions: {}".format(
+                args.input[0], len(data), args.phase, data["Timestamp"].iloc[0], data["Timestamp"].iloc[-1],
+                    data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0], data["Instrs"].iloc[-1]))
+            print("{}: {} accesses in phase {}, time window between {} and {} ({}) msecs, retired instructions: {}".format(
+                args.input[1], len(data2), args.phase, data2["Timestamp"].iloc[0], data2["Timestamp"].iloc[-1],
+                    data2["Timestamp"].iloc[-1] - data2["Timestamp"].iloc[0], data2["Instrs"].iloc[-1]))
+
+
+        '''
+        phdata = []
+        instrs = []
+        durations = []
+        nr_accesses = []
+
+        phdata.append(data[data["Phase"] == int(args.phase)])
+        phdata.append(data2[data2["Phase"] == int(args.phase)])
+
+        for i in range(len(phdata)):
+            instrs.append(phdata[i]["Instrs"].iloc[-1])
+            durations.append(phdata[i]["Timestamp"].iloc[-1] - phdata[i]["Timestamp"].iloc[0])
+            nr_accesses.append(len(phdata[i]))
+
+            print("{}: {} accesses in phase {}, time window between {} and {} ({}) msecs, retired instructions: {}".format(
+                args.input[i], len(phdata[i]), args.phase, phdata[i]["Timestamp"].iloc[0], phdata[i]["Timestamp"].iloc[-1],
+                    phdata[i]["Timestamp"].iloc[-1] - phdata[i]["Timestamp"].iloc[0], phdata[i]["Instrs"].iloc[-1]))
+
+        print(instrs)
+        print(durations)
+        print(nr_accesses)
+        '''
 
         i = 0
         i2 = 0
         i_prev = 0
         i2_prev = 0
-        t_start = 0
-        t_start2 = 0
+        windows = 0
+
+        compare_window = args.compare_window
+        if args.compare_window_unit == "ms":
+            compare_window2 = ((data2["Timestamp"].iloc[-1] - data2["Timestamp"].iloc[0]) /
+                                ((data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0]) / compare_window))
+            i_start = data["Timestamp"].iloc[0]
+            i_start2 = data2["Timestamp"].iloc[0]
+        elif args.compare_window_unit == "instrs":
+            compare_window2 = ((data2["Instrs"].iloc[-1] - data2["Instrs"].iloc[0]) /
+                                ((data["Instrs"].iloc[-1] - data["Instrs"].iloc[0]) / compare_window))
+            i_start = data["Instrs"].iloc[0]
+            i_start2 = data2["Instrs"].iloc[0]
+        elif args.compare_window_unit == "accesses":
+            compare_window2 = len(data2) / (len(data) / compare_window)
+            i_start = 0
+            i_start2 = 0
+        else:
+            print("error: invalid compare_window_unit")
+            sys.exit(-1)
+
+        print("compare_window: {} {}, compare_window2: {} {}".format(
+            compare_window,
+            args.compare_window_unit,
+            compare_window2,
+            args.compare_window_unit))
+
 
         while i < len(data) and i2 < len(data2):
             pages = {}
             pages2 = {}
+            inter = {}
+
             if args.compare_window_unit == "ms":
-                while (data["Timestamp"].iloc[i] - t_start) < args.compare_window:
+                while (data["Timestamp"].iloc[i] - i_start) < compare_window and i < len(data):
                     pages[int(data["Vaddr"].iloc[i] / PAGE_SIZE)] = None
                     i = i + 1
 
-                while (data2["Timestamp"].iloc[i2] - t_start2) < args.compare_window:
+                while (data2["Timestamp"].iloc[i2] - i_start2) < compare_window2 and i2 < len(data2):
                     pages2[int(data2["Vaddr"].iloc[i2] / PAGE_SIZE)] = None
                     i2 = i2 + 1
-            else:
-                while (i - i_prev) < args.compare_window:
+
+            elif args.compare_window_unit == "instrs":
+                while (data["Instrs"].iloc[i] - i_start) < compare_window and i < len(data):
                     pages[int(data["Vaddr"].iloc[i] / PAGE_SIZE)] = None
                     i = i + 1
 
-                while (i2 - i_prev) < args.compare_window:
+                while (data2["Instrs"].iloc[i2] - i_start2) < compare_window2 and i2 < len(data2):
+                    pages2[int(data2["Vaddr"].iloc[i2] / PAGE_SIZE)] = None
+                    i2 = i2 + 1
+
+            elif args.compare_window_unit == "accesses":
+                while (i - i_start) < compare_window and i < len(data):
+                    pages[int(data["Vaddr"].iloc[i] / PAGE_SIZE)] = None
+                    i = i + 1
+
+                while (i2 - i_start2) < compare_window2 and i2 < len(data2):
                     pages2[int(data2["Vaddr"].iloc[i2] / PAGE_SIZE)] = None
                     i2 = i2 + 1
 
@@ -218,24 +307,44 @@ def main():
             for page in pages.keys():
                 if page in pages2:
                     nr_overlap += 1
+                    inter[page] = None
                 nr_total += 1
 
+            '''
+            for page in pages2.keys():
+                if page in inter:
+                    continue
 
-            print("[{}, {}]: {} of accesses".format(t_start, data["Timestamp"].iloc[i], i - i_prev))
-            #print(pages)
+                if page in pages:
+                    nr_overlap += 1
+                nr_total += 1
+            '''
 
-            print("[{}, {}]: {} of accesses".format(t_start2, data2["Timestamp"].iloc[i2], i2 - i2_prev))
-            #print(pages2)
+            if args.compare_window_unit == "ms":
+                print("[{}, {}]({}): {} of accesses".format(i_start, data["Timestamp"].iloc[i], args.compare_window_unit, i - i_prev))
+                print("[{}, {}]({}): {} of accesses".format(i_start2, data2["Timestamp"].iloc[i2], args.compare_window_unit, i2 - i2_prev))
+                i_start = data["Timestamp"].iloc[i]
+                i_start2 = data2["Timestamp"].iloc[i2]
+            elif args.compare_window_unit == "instrs":
+                print("[{}, {}]({}): {} of accesses".format(i_start, data["Instrs"].iloc[i], args.compare_window_unit, i - i_prev))
+                print("[{}, {}]({}): {} of accesses".format(i_start2, data2["Instrs"].iloc[i2], args.compare_window_unit, i2 - i2_prev))
+                i_start = data["Instrs"].iloc[i]
+                i_start2 = data["Instrs"].iloc[i2]
+            elif args.compare_window_unit == "accesses":
+                print("[{}, {}]({}): {} of accesses".format(i_start, i, args.compare_window_unit, i - i_prev))
+                print("[{}, {}]({}): {} of accesses".format(i_start2, i2, args.compare_window_unit, i2 - i2_prev))
+                i_start = i
+                i_start2 = i2
 
             print("overlap: {}".format(float(nr_overlap) / nr_total))
 
-            t_start = data["Timestamp"].iloc[i]
-            t_start2 = data2["Timestamp"].iloc[i2]
             i_prev = i
             i2_prev = i2
+            windows += 1
 
-            if data["Timestamp"].iloc[i] > 5000:
-                sys.exit(0)
+            #if windows == 10:
+            #    sys.exit(0)
+
 
     if args.phases:
         for p in range(data["Phase"].iloc[-1]):
@@ -248,9 +357,13 @@ def main():
                         len(__data),
                         int(__data["Timestamp"].iloc[0]),
                         int(__data["Timestamp"].iloc[-1]),
-                        int(__data["Timestamp"].iloc[-1] - __data["Timestamp"].iloc[0]),
+                        float(__data["Timestamp"].iloc[-1] - __data["Timestamp"].iloc[0]),
                         __data["Instrs"].iloc[-1]))
+
         sys.exit(0)
+
+
+
 
 
     if (args.phase is not None):
@@ -266,6 +379,24 @@ def main():
         print("Using {} accesses in phase {}, time window between {} and {} ({}) msecs, retired instructions: {}".format(
             len(data), args.phase, data["Timestamp"].iloc[0], data["Timestamp"].iloc[-1],
                 data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0], data["Instrs"].iloc[-1]))
+
+        if args.phase_window is not None or args.phase_steps is not None:
+            prev_ts = data["Timestamp"].iloc[0]
+            prev_instr = 0
+            window = 20.0
+            if args.phase_window is not None:
+                window = float(args.phase_window)
+
+            if args.phase_steps is not None:
+                window = float(data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0]) / args.phase_steps
+
+            for i in range(len(data)):
+                ts = data["Timestamp"].iloc[i]
+                instr = data["Instrs"].iloc[i]
+                if prev_ts + window <= ts:
+                    print("{}-{}: {} instrs, {} instrs / msec".format(prev_ts, ts, int(instr - prev_instr), float(instr - prev_instr) / (ts - prev_ts)))
+                    prev_instr = instr
+                    prev_ts = ts
 
 
 
@@ -450,7 +581,7 @@ def main():
 
     #print(plotdatas)
     if args.plot:
-        outfile = args.input
+        outfile = args.input[0]
 
         if (args.low_vaddr is not None and
             args.high_vaddr is not None):
