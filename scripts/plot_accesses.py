@@ -98,21 +98,27 @@ def plot_to_file_finalize(output):
     importlib.reload(sns)
 
 
-def detect_intervals(data):
+def detect_intervals(data, verbose = True):
+    PAGE_SIZE = 8192
+    def plus(a, b):
+        return a + b
+
     intervals = IntervalTree()
 
     if args.interval_distance is None:
         print("error: you must specify --interval-distance when detecting intervals")
         sys.exit(-1)
 
-    print("Detecting address intervals...")
+    if verbose:
+        print("Detecting address intervals...")
     vaddrlist = data["Vaddr"].tolist()
     for i in range(0, len(vaddrlist)):
         vaddr = vaddrlist[i]
-        low_vaddr = vaddr - (args.interval_distance * 4096)
-        high_vaddr = vaddr + (args.interval_distance * 4096)
-        intervals[low_vaddr:high_vaddr] = None
-        intervals.merge_overlaps()
+        # Align to page size
+        low_vaddr = (vaddr & (~(PAGE_SIZE - 1))) - (args.interval_distance * PAGE_SIZE)
+        high_vaddr = (vaddr + (args.interval_distance * PAGE_SIZE)) & (~(PAGE_SIZE - 1))
+        intervals[low_vaddr:high_vaddr] = 1
+        intervals.merge_overlaps(data_reducer = plus)
 
     nr_valid_intervals = 0
     height_ratios = []
@@ -131,27 +137,29 @@ def detect_intervals(data):
 
         plot_to_file_init(nr_valid_intervals, height_ratios, (data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0]))
 
-    ind = 1
-    for interval in sorted(intervals):
-        low_vaddr = interval.begin
-        high_vaddr = interval.end
-        plotdata = data.copy()
-        plotdata = plotdata[plotdata["Vaddr"] >= low_vaddr]
-        plotdata = plotdata[plotdata["Vaddr"] <= high_vaddr]
-        if len(plotdata) < args.min_accesses:
-            continue
+    if verbose or args.plot:
+        ind = 1
+        for interval in sorted(intervals):
+            low_vaddr = interval.begin
+            high_vaddr = interval.end
+            plotdata = data.copy()
+            plotdata = plotdata[plotdata["Vaddr"] >= low_vaddr]
+            plotdata = plotdata[plotdata["Vaddr"] <= high_vaddr]
+            if len(plotdata) < args.min_accesses:
+                continue
 
-        print("Virtual range: {} - {} ({} pages), nr accesses: {}".format(
-            '0x%x' % interval.begin,
-            '0x%x' % interval.end,
-            (interval.end - interval.begin) / 4096,
-            len(plotdata)))
+            if verbose:
+                print("Virtual range: {} - {} ({} pages), nr accesses: {}".format(
+                    '0x%x' % interval.begin,
+                    '0x%x' % interval.end,
+                    (interval.end - interval.begin) / 4096,
+                    len(plotdata)))
 
-        if args.plot:
-            plot_to_file_add_subplot(nr_valid_intervals - ind,
-                    plotdata, high_vaddr - low_vaddr,
-                    (data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0]))
-        ind += 1
+            if args.plot:
+                plot_to_file_add_subplot(nr_valid_intervals - ind,
+                        plotdata, high_vaddr - low_vaddr,
+                        (data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0]))
+            ind += 1
 
     if args.plot and nr_valid_intervals > 0:
         outfile = args.input[0]
@@ -164,6 +172,8 @@ def detect_intervals(data):
             outfile = "{}-phase-{}".format(outfile, args.phase)
         outfile = "{}-intervals.pdf".format(outfile)
         plot_to_file_finalize(outfile)
+
+    return intervals
 
 
 def main():
@@ -224,7 +234,7 @@ def main():
         type=int, help='Cluster width in number of pages (4kB sized).')
 
     parser.add_argument('--plot', default=False, action='store_true', help="Generate plots.")
-    parser.add_argument('--min-accesses', required=False, default=50,
+    parser.add_argument('--min-accesses', required=False, default=100,
         type=int, help='Minimum number of accesses in a cluster/interval to plot.')
     args = parser.parse_args()
 
@@ -283,71 +293,149 @@ def main():
                 args.input[1], len(data2), args.phase, data2["Timestamp"].iloc[0], data2["Timestamp"].iloc[-1],
                     data2["Timestamp"].iloc[-1] - data2["Timestamp"].iloc[0], data2["Instrs"].iloc[-1]))
 
-
-        i = 0
-        i2 = 0
-        i_prev = 0
-        i2_prev = 0
-        windows = 0
-
         compare_window = args.compare_window
         if args.compare_window_unit == "ms":
-            compare_window2 = ((data2["Timestamp"].iloc[-1] - data2["Timestamp"].iloc[0]) /
-                                ((data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0]) / compare_window))
-            i_start = data["Timestamp"].iloc[0]
-            i_start2 = data2["Timestamp"].iloc[0]
+            nr_wins = int((data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0]) / compare_window)
+            compare_window2 = int((data2["Timestamp"].iloc[-1] - data2["Timestamp"].iloc[0]) / nr_wins)
+
         elif args.compare_window_unit == "instrs":
-            compare_window2 = ((data2["Instrs"].iloc[-1] - data2["Instrs"].iloc[0]) /
-                                ((data["Instrs"].iloc[-1] - data["Instrs"].iloc[0]) / compare_window))
-            i_start = data["Instrs"].iloc[0]
-            i_start2 = data2["Instrs"].iloc[0]
+            nr_wins = int((data["Instrs"].iloc[-1] - data["Instrs"].iloc[0]) / compare_window)
+            compare_window2 = int((data2["Instrs"].iloc[-1] - data2["Instrs"].iloc[0]) / nr_wins)
+
         elif args.compare_window_unit == "accesses":
-            compare_window2 = len(data2) / (len(data) / compare_window)
-            i_start = 0
-            i_start2 = 0
+            nr_wins = int(len(data) / compare_window)
+            compare_window2 = int(len(data2) / nr_wins)
         else:
             print("error: invalid compare_window_unit")
             sys.exit(-1)
 
-        print("compare_window: {} {}, compare_window2: {} {}".format(
+        print("{} windows with compare_window: {} {}, compare_window2: {} {}".format(
+            nr_wins,
             compare_window,
             args.compare_window_unit,
             compare_window2,
             args.compare_window_unit))
 
-
-        while i < len(data) and i2 < len(data2):
+        for win in range(nr_wins):
             pages = {}
             pages2 = {}
             inter = {}
 
+            # Select data
             if args.compare_window_unit == "ms":
-                while (data["Timestamp"].iloc[i] - i_start) < compare_window and i < len(data):
-                    pages[int(data["Vaddr"].iloc[i] / PAGE_SIZE)] = None
-                    i = i + 1
-
-                while (data2["Timestamp"].iloc[i2] - i_start2) < compare_window2 and i2 < len(data2):
-                    pages2[int(data2["Vaddr"].iloc[i2] / PAGE_SIZE)] = None
-                    i2 = i2 + 1
-
+                win_data = data[data["Timestamp"] >= (compare_window * win) and data["Timestamp"] < (compare_window * (win + 1))]
+                win_data2 = data2[data2["Timestamp"] >= (compare_window2 * win) and data2["Timestamp"] < (compare_window2 * (win + 1))]
             elif args.compare_window_unit == "instrs":
-                while (data["Instrs"].iloc[i] - i_start) < compare_window and i < len(data):
-                    pages[int(data["Vaddr"].iloc[i] / PAGE_SIZE)] = None
-                    i = i + 1
-
-                while (data2["Instrs"].iloc[i2] - i_start2) < compare_window2 and i2 < len(data2):
-                    pages2[int(data2["Vaddr"].iloc[i2] / PAGE_SIZE)] = None
-                    i2 = i2 + 1
-
+                win_data = data[data["Instrs"] >= (compare_window * win) and data["Instrs"] < (compare_window * (win + 1))]
+                win_data2 = data2[data2["Instrs"] >= (compare_window2 * win) and data2["Instrs"] < (compare_window2 * (win + 1))]
             elif args.compare_window_unit == "accesses":
-                while (i - i_start) < compare_window and i < len(data):
-                    pages[int(data["Vaddr"].iloc[i] / PAGE_SIZE)] = None
-                    i = i + 1
+                win_data = data[(compare_window * win):(compare_window * (win + 1))]
+                win_data2 = data2[(compare_window2 * win):(compare_window2 * (win + 1))]
 
-                while (i2 - i_start2) < compare_window2 and i2 < len(data2):
-                    pages2[int(data2["Vaddr"].iloc[i2] / PAGE_SIZE)] = None
-                    i2 = i2 + 1
+            intervals = detect_intervals(win_data, verbose = False)
+            intervals2 = detect_intervals(win_data2, verbose = False)
 
+            nr_accs = []
+            for interval in intervals:
+                nr_accs.append(interval.data)
+
+            l_sum = 0
+            acc_limit = 0
+            for l in reversed(sorted(nr_accs)):
+                l_sum += l
+                if l_sum > len(win_data) * 0.9:
+                    acc_limit = l
+                    break
+
+            acc_limit2 = acc_limit * len(win_data) / len(win_data2)
+            #print("acc_limit: {}, acc_limit2: {}".format(acc_limit, acc_limit2))
+
+            interval_pairs = IntervalTree()
+            for interval in sorted(intervals):
+                if interval.data < acc_limit:
+                    continue
+
+                low_vaddr = interval.begin
+                high_vaddr = interval.end
+                interval_pages = int((high_vaddr - low_vaddr) / PAGE_SIZE)
+
+                for interval2 in sorted(intervals2):
+                    if interval2.data < acc_limit2:
+                        continue
+
+                    low_vaddr2 = interval2.begin
+                    high_vaddr2 = interval2.end
+                    interval_pages2 = int((high_vaddr2 - low_vaddr2) / PAGE_SIZE)
+
+                    if interval_pages < (interval_pages2 * 0.9) or interval_pages > (interval_pages2 * 1.1):
+                        continue
+
+                    # Don't even bother.. 
+                    if low_vaddr == low_vaddr2:
+                        break
+
+                    if interval.data < (interval2.data * 0.8) or interval.data > (interval2.data * 1.2):
+                        continue
+
+                    interval_pairs[interval.begin:interval.end] = interval2
+                    print("interval: {} - {} (#pages: {}, #accs: {}) -> {} - {} (#pages: {}, #accs: {})".format(
+                        '0x%x' % interval.begin,
+                        '0x%x' % interval.end,
+                        interval_pages,
+                        interval.data,
+                        '0x%x' % interval2.begin,
+                        '0x%x' % interval2.end,
+                        interval_pages2,
+                        interval2.data))
+                    break
+
+
+
+
+            for interval in sorted(intervals):
+                if interval.data < args.min_accesses:
+                    continue
+                low_vaddr = interval.begin
+                high_vaddr = interval.end
+                interval_pages = int((high_vaddr - low_vaddr) / PAGE_SIZE)
+                print("DRAM VA range: {} - {} ({} pages), # of accesses: {} ({})".format(
+                    '0x%x' % interval.begin,
+                    '0x%x' % interval.end,
+                    interval_pages,
+                    len(win_data[(win_data["Vaddr"] >= low_vaddr) & (win_data["Vaddr"] < high_vaddr)]),
+                    interval.data))
+
+            intervals2_by_nracc = {}
+            for interval2 in sorted(intervals2):
+                if interval2.data < args.min_accesses:
+                    continue
+                low_vaddr2 = interval2.begin
+                high_vaddr2 = interval2.end
+                interval_pages2 = int((high_vaddr2 - low_vaddr2) / PAGE_SIZE)
+                print("MCDRAM VA range: {} - {} ({} pages), # of accesses: {}".format(
+                    '0x%x' % interval2.begin,
+                    '0x%x' % interval2.end,
+                    interval_pages2,
+                    len(win_data2[(win_data2["Vaddr"] >= low_vaddr2) & (win_data2["Vaddr"] < high_vaddr2)])))
+
+
+
+            # Compare pages
+            for i in range(len(win_data)):
+                addr = win_data["Vaddr"].iloc[i]
+
+                # Translate addr based on interval pairs if match exists
+                matches = interval_pairs[addr]
+                if len(list(matches)) == 1:
+                    match = list(matches)[0]
+                    taddr = addr - match.begin + match.data.begin
+                    #print("address {} translated to {}".format('0x%x' % addr, '0x%x' % taddr))
+                    pages[int(taddr / PAGE_SIZE)] = None
+                else:
+                    pages[int(addr / PAGE_SIZE)] = None
+
+            for i in range(len(win_data2)):
+                pages2[int(win_data2["Vaddr"].iloc[i] / PAGE_SIZE)] = None
 
             nr_overlap = 0
             nr_total = 0
@@ -368,29 +456,19 @@ def main():
             '''
 
             if args.compare_window_unit == "ms":
-                print("[{}, {}]({}): {} of accesses".format(i_start, data["Timestamp"].iloc[i], args.compare_window_unit, i - i_prev))
-                print("[{}, {}]({}): {} of accesses".format(i_start2, data2["Timestamp"].iloc[i2], args.compare_window_unit, i2 - i2_prev))
-                i_start = data["Timestamp"].iloc[i]
-                i_start2 = data2["Timestamp"].iloc[i2]
+                print("[{}, {}]({}): {} of accesses".format(win_data["Timestamp"].iloc[0], win_data["Timestamp"].iloc[-1], args.compare_window_unit, len(win_data)))
+                print("[{}, {}]({}): {} of accesses".format(win_data2["Timestamp"].iloc[0], win_data2["Timestamp"].iloc[-1], args.compare_window_unit, len(win_data2)))
             elif args.compare_window_unit == "instrs":
-                print("[{}, {}]({}): {} of accesses".format(i_start, data["Instrs"].iloc[i], args.compare_window_unit, i - i_prev))
-                print("[{}, {}]({}): {} of accesses".format(i_start2, data2["Instrs"].iloc[i2], args.compare_window_unit, i2 - i2_prev))
-                i_start = data["Instrs"].iloc[i]
-                i_start2 = data["Instrs"].iloc[i2]
+                print("[{}, {}]({}): {} of accesses".format(win_data["Instrs"].iloc[0], win_data["Instrs"].iloc[-1], args.compare_window_unit, len(win_data)))
+                print("[{}, {}]({}): {} of accesses".format(win_data2["Instrs"].iloc[0], win_data2["Instrs"].iloc[-1], args.compare_window_unit, len(win_data2)))
             elif args.compare_window_unit == "accesses":
-                print("[{}, {}]({}): {} of accesses".format(i_start, i, args.compare_window_unit, i - i_prev))
-                print("[{}, {}]({}): {} of accesses".format(i_start2, i2, args.compare_window_unit, i2 - i2_prev))
-                i_start = i
-                i_start2 = i2
+                print("[{}, {}]({}): {} of accesses".format(win * compare_window, (win + 1) * compare_window - 1, args.compare_window_unit, len(win_data)))
+                print("[{}, {}]({}): {} of accesses".format(win * compare_window2, (win + 1) * compare_window2 - 1, args.compare_window_unit, len(win_data2)))
 
             print("overlap: {}".format(float(nr_overlap) / nr_total))
+            print("")
 
-            i_prev = i
-            i2_prev = i2
-            windows += 1
-
-            #if windows == 10:
-            #    sys.exit(0)
+        sys.exit(0)
 
 
     if args.phases:
