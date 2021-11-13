@@ -65,7 +65,7 @@ def plot_to_file_init(nr_rows, height_ratios, msecs):
         gridspec_kw = {'height_ratios': height_ratios})
     if nr_rows == 1:
         axes = [axes]
-    
+
 
 def plot_to_file_add_subplot(row, data, interval_len, msecs_total):
     global fig
@@ -220,7 +220,7 @@ def main():
         type=int, help='Max number of pages between accesses that belong to the same interval.')
 
     parser.add_argument('--compare', default=False, action='store_true', help="Compare two traces.")
-    parser.add_argument('--compare-window', required=False, default=50,
+    parser.add_argument('--compare-window-len', required=False, default=50,
         type=int, help='Comparison window length.')
     parser.add_argument('--compare-window-unit', required=False, default="ms",
         help='Comparison window length unit (accesses, ms or instrs).')
@@ -236,6 +236,14 @@ def main():
     parser.add_argument('--plot', default=False, action='store_true', help="Generate plots.")
     parser.add_argument('--min-accesses', required=False, default=100,
         type=int, help='Minimum number of accesses in a cluster/interval to plot.')
+
+    parser.add_argument("--hbm", type=str, required=False,
+        action='append',
+        help=("Memory ranges that are placed in high-bandwidth memory (e.g., 0x2aaaf9144000-0x2aaafabd0000)"))
+    parser.add_argument('--estimate', default=False, action='store_true',
+        help=("Estimate runtime based on two traces and the specified HBM ranges."))
+    parser.add_argument('--verbose', default=False, action='store_true')
+
     args = parser.parse_args()
 
     #sns.set_theme()
@@ -271,6 +279,88 @@ def main():
         sys.exit(0)
 
 
+    hbm_intervals = IntervalTree()
+    if args.hbm:
+        for i in range(len(args.hbm)):
+            addrs_s = args.hbm[i].split("-")
+            if len(addrs_s) < 2:
+                print("error: invalid --hbm argument: {}".format(args.hbm[i]))
+                sys.exit(-1)
+
+            low = auto_int(addrs_s[0])
+            high = auto_int(addrs_s[1])
+            hbm_intervals[low:high] = None
+        hbm_intervals.merge_overlaps()
+        for interval in sorted(hbm_intervals):
+            print("HBM range: {}-{}".format(
+                        '0x%x' % interval.begin,
+                        '0x%x' % interval.end))
+
+
+    # Runtime estimator
+    if args.estimate:
+        if data2 is None:
+            print("error: you must specify two input files for estimation")
+            sys.exit(-1)
+
+        if args.phase is not None:
+            data = data[data["Phase"] == int(args.phase)]
+            data2 = data2[data2["Phase"] == int(args.phase)]
+            print("{}: {} accesses in phase {}, time window between {} and {} ({}) msecs, retired instructions: {}".format(
+                args.input[0], len(data), args.phase, data["Timestamp"].iloc[0], data["Timestamp"].iloc[-1],
+                    data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0], data["Instrs"].iloc[-1]))
+            print("{}: {} accesses in phase {}, time window between {} and {} ({}) msecs, retired instructions: {}".format(
+                args.input[1], len(data2), args.phase, data2["Timestamp"].iloc[0], data2["Timestamp"].iloc[-1],
+                    data2["Timestamp"].iloc[-1] - data2["Timestamp"].iloc[0], data2["Instrs"].iloc[-1]))
+
+
+        prev_phase = -1
+        phase = -1
+
+        nr_hbm_accesses = 0
+        nr_accesses = 0
+
+        t_all = 0
+
+        for i in range(len(data)):
+            if phase == -1:
+                phase = data["Phase"].iloc[i]
+                prev_phase = data["Phase"].iloc[i]
+
+            phase = data["Phase"].iloc[i]
+
+            # New phase or end of data?
+            if prev_phase != phase or i == (len(data) - 1):
+                data_phase = data[data["Phase"] == prev_phase]
+                data2_phase = data2[data2["Phase"] == prev_phase]
+
+                if len(data_phase) > 0 and len(data2_phase) > 0:
+                    t2 = data2_phase["Timestamp"].iloc[-1] - data2_phase["Timestamp"].iloc[0]
+                    t = data_phase["Timestamp"].iloc[-1] - data_phase["Timestamp"].iloc[0]
+
+                    print("phase: {}: t: {}, t2: {}, nr_hbm_accesses: {}, nr_accesses: {}".format(
+                        prev_phase, t, t2, nr_hbm_accesses, nr_accesses))
+                    if t2 < t:
+                        t = int(t - (float(t - t2) * (float(nr_hbm_accesses) / nr_accesses)))
+
+                    print("phase: {}: estimated runtime: {} msecs (full HBM: {} msecs)".format(prev_phase, t, t2))
+                    t_all += t
+
+                prev_phase = phase
+                nr_hbm_accesses = 0
+                nr_accesses = 0
+
+
+            if hbm_intervals.overlaps(data["Vaddr"].iloc[i]):
+                nr_hbm_accesses += 1
+
+            nr_accesses += 1
+        print("estimated overall runtime: {} msecs".format(t_all))
+
+
+        sys.exit(0)
+
+
     # Traces comparison
     if args.compare:
         PAGE_SIZE = 32768
@@ -293,7 +383,7 @@ def main():
                 args.input[1], len(data2), args.phase, data2["Timestamp"].iloc[0], data2["Timestamp"].iloc[-1],
                     data2["Timestamp"].iloc[-1] - data2["Timestamp"].iloc[0], data2["Instrs"].iloc[-1]))
 
-        compare_window = args.compare_window
+        compare_window = args.compare_window_len
         if args.compare_window_unit == "ms":
             nr_wins = int((data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0]) / compare_window)
             compare_window2 = int((data2["Timestamp"].iloc[-1] - data2["Timestamp"].iloc[0]) / nr_wins)
@@ -323,100 +413,101 @@ def main():
 
             # Select data
             if args.compare_window_unit == "ms":
-                win_data = data[data["Timestamp"] >= (compare_window * win) and data["Timestamp"] < (compare_window * (win + 1))]
-                win_data2 = data2[data2["Timestamp"] >= (compare_window2 * win) and data2["Timestamp"] < (compare_window2 * (win + 1))]
+                win_data = data[(data["Timestamp"] >= (compare_window * win)) & (data["Timestamp"] < (compare_window * (win + 1)))]
+                win_data2 = data2[(data2["Timestamp"] >= (compare_window2 * win)) & (data2["Timestamp"] < (compare_window2 * (win + 1)))]
             elif args.compare_window_unit == "instrs":
-                win_data = data[data["Instrs"] >= (compare_window * win) and data["Instrs"] < (compare_window * (win + 1))]
-                win_data2 = data2[data2["Instrs"] >= (compare_window2 * win) and data2["Instrs"] < (compare_window2 * (win + 1))]
+                win_data = data[(data["Instrs"] >= (compare_window * win)) & (data["Instrs"] < (compare_window * (win + 1)))]
+                win_data2 = data2[(data2["Instrs"] >= (compare_window2 * win)) & (data2["Instrs"] < (compare_window2 * (win + 1)))]
             elif args.compare_window_unit == "accesses":
                 win_data = data[(compare_window * win):(compare_window * (win + 1))]
                 win_data2 = data2[(compare_window2 * win):(compare_window2 * (win + 1))]
 
-            intervals = detect_intervals(win_data, verbose = False)
-            intervals2 = detect_intervals(win_data2, verbose = False)
-
-            nr_accs = []
-            for interval in intervals:
-                nr_accs.append(interval.data)
-
-            l_sum = 0
-            acc_limit = 0
-            for l in reversed(sorted(nr_accs)):
-                l_sum += l
-                if l_sum > len(win_data) * 0.9:
-                    acc_limit = l
-                    break
-
-            acc_limit2 = acc_limit * len(win_data) / len(win_data2)
-            #print("acc_limit: {}, acc_limit2: {}".format(acc_limit, acc_limit2))
-
             interval_pairs = IntervalTree()
-            for interval in sorted(intervals):
-                if interval.data < acc_limit:
-                    continue
 
-                low_vaddr = interval.begin
-                high_vaddr = interval.end
-                interval_pages = int((high_vaddr - low_vaddr) / PAGE_SIZE)
+            if args.detect_intervals:
+                intervals = detect_intervals(win_data, verbose = False)
+                intervals2 = detect_intervals(win_data2, verbose = False)
 
-                for interval2 in sorted(intervals2):
-                    if interval2.data < acc_limit2:
-                        continue
+                nr_accs = []
+                for interval in intervals:
+                    nr_accs.append(interval.data)
 
-                    low_vaddr2 = interval2.begin
-                    high_vaddr2 = interval2.end
-                    interval_pages2 = int((high_vaddr2 - low_vaddr2) / PAGE_SIZE)
-
-                    if interval_pages < (interval_pages2 * 0.9) or interval_pages > (interval_pages2 * 1.1):
-                        continue
-
-                    # Don't even bother.. 
-                    if low_vaddr == low_vaddr2:
+                l_sum = 0
+                acc_limit = 0
+                for l in reversed(sorted(nr_accs)):
+                    l_sum += l
+                    if l_sum > len(win_data) * 0.9:
+                        acc_limit = l
                         break
 
-                    if interval.data < (interval2.data * 0.8) or interval.data > (interval2.data * 1.2):
+                acc_limit2 = acc_limit * len(win_data) / len(win_data2)
+                #print("acc_limit: {}, acc_limit2: {}".format(acc_limit, acc_limit2))
+
+                for interval in sorted(intervals):
+                    if interval.data < acc_limit:
                         continue
 
-                    interval_pairs[interval.begin:interval.end] = interval2
-                    print("interval: {} - {} (#pages: {}, #accs: {}) -> {} - {} (#pages: {}, #accs: {})".format(
+                    low_vaddr = interval.begin
+                    high_vaddr = interval.end
+                    interval_pages = int((high_vaddr - low_vaddr) / PAGE_SIZE)
+
+                    for interval2 in sorted(intervals2):
+                        if interval2.data < acc_limit2:
+                            continue
+
+                        low_vaddr2 = interval2.begin
+                        high_vaddr2 = interval2.end
+                        interval_pages2 = int((high_vaddr2 - low_vaddr2) / PAGE_SIZE)
+
+                        if interval_pages < (interval_pages2 * 0.9) or interval_pages > (interval_pages2 * 1.1):
+                            continue
+
+                        # Don't even bother..
+                        if low_vaddr == low_vaddr2:
+                            break
+
+                        if interval.data < (interval2.data * 0.8) or interval.data > (interval2.data * 1.2):
+                            continue
+
+                        interval_pairs[interval.begin:interval.end] = interval2
+                        print("interval: {} - {} (#pages: {}, #accs: {}) -> {} - {} (#pages: {}, #accs: {})".format(
+                            '0x%x' % interval.begin,
+                            '0x%x' % interval.end,
+                            interval_pages,
+                            interval.data,
+                            '0x%x' % interval2.begin,
+                            '0x%x' % interval2.end,
+                            interval_pages2,
+                            interval2.data))
+                        break
+
+
+
+                for interval in sorted(intervals):
+                    if interval.data < args.min_accesses:
+                        continue
+                    low_vaddr = interval.begin
+                    high_vaddr = interval.end
+                    interval_pages = int((high_vaddr - low_vaddr) / PAGE_SIZE)
+                    print("DRAM VA range: {} - {} ({} pages), # of accesses: {} ({})".format(
                         '0x%x' % interval.begin,
                         '0x%x' % interval.end,
                         interval_pages,
-                        interval.data,
+                        len(win_data[(win_data["Vaddr"] >= low_vaddr) & (win_data["Vaddr"] < high_vaddr)]),
+                        interval.data))
+
+                intervals2_by_nracc = {}
+                for interval2 in sorted(intervals2):
+                    if interval2.data < args.min_accesses:
+                        continue
+                    low_vaddr2 = interval2.begin
+                    high_vaddr2 = interval2.end
+                    interval_pages2 = int((high_vaddr2 - low_vaddr2) / PAGE_SIZE)
+                    print("MCDRAM VA range: {} - {} ({} pages), # of accesses: {}".format(
                         '0x%x' % interval2.begin,
                         '0x%x' % interval2.end,
                         interval_pages2,
-                        interval2.data))
-                    break
-
-
-
-
-            for interval in sorted(intervals):
-                if interval.data < args.min_accesses:
-                    continue
-                low_vaddr = interval.begin
-                high_vaddr = interval.end
-                interval_pages = int((high_vaddr - low_vaddr) / PAGE_SIZE)
-                print("DRAM VA range: {} - {} ({} pages), # of accesses: {} ({})".format(
-                    '0x%x' % interval.begin,
-                    '0x%x' % interval.end,
-                    interval_pages,
-                    len(win_data[(win_data["Vaddr"] >= low_vaddr) & (win_data["Vaddr"] < high_vaddr)]),
-                    interval.data))
-
-            intervals2_by_nracc = {}
-            for interval2 in sorted(intervals2):
-                if interval2.data < args.min_accesses:
-                    continue
-                low_vaddr2 = interval2.begin
-                high_vaddr2 = interval2.end
-                interval_pages2 = int((high_vaddr2 - low_vaddr2) / PAGE_SIZE)
-                print("MCDRAM VA range: {} - {} ({} pages), # of accesses: {}".format(
-                    '0x%x' % interval2.begin,
-                    '0x%x' % interval2.end,
-                    interval_pages2,
-                    len(win_data2[(win_data2["Vaddr"] >= low_vaddr2) & (win_data2["Vaddr"] < high_vaddr2)])))
+                        len(win_data2[(win_data2["Vaddr"] >= low_vaddr2) & (win_data2["Vaddr"] < high_vaddr2)])))
 
 
 
