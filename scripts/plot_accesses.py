@@ -12,6 +12,7 @@ from sklearn.cluster import KMeans
 from kneed import KneeLocator
 from intervaltree import Interval, IntervalTree
 import importlib
+import time
 
 fig = None
 axes = None
@@ -112,9 +113,7 @@ def detect_intervals(data, verbose = True):
 
     if verbose:
         print("Detecting address intervals...")
-    vaddrlist = data["Vaddr"].tolist()
-    for i in range(0, len(vaddrlist)):
-        vaddr = vaddrlist[i]
+    for vaddr in data["Vaddr"].values:
         # Align to page size
         low_vaddr = (vaddr & (~(PAGE_SIZE - 1))) - (args.interval_distance * PAGE_SIZE)
         high_vaddr = (vaddr + (args.interval_distance * PAGE_SIZE)) & (~(PAGE_SIZE - 1))
@@ -575,17 +574,43 @@ def main():
 
                 # Runtime estimate?
                 if args.estimate:
+                    PAGE_SIZE = 4096
                     nr_hbm_accesses = 0
                     nr_accesses = 0
+
+                    def is_hbm(nr_hbm_accesses, vaddr):
+                        if hbm_intervals.overlaps(vaddr):
+                            nr_hbm_accesses += 1
 
                     t2 = win_data2["Timestamp"].iloc[-1] - win_data2["Timestamp"].iloc[0]
                     t = win_data["Timestamp"].iloc[-1] - win_data["Timestamp"].iloc[0]
 
                     if t > (t2 * 1.03):
-                        for i in range(len(win_data)):
-                            if hbm_intervals.overlaps(win_data["Vaddr"].iloc[i]):
+                        nr_accesses = len(win_data)
+
+                        #win_t_s = time.time()
+                        #print("iterating phase {}/{} window {}".format(phase, data["Phase"].iloc[-1], win))
+
+                        # Basic iteration
+                        #for i in range(len(win_data)):
+                        #    if hbm_intervals.overlaps(win_data["Vaddr"].iloc[i]):
+                        #        nr_hbm_accesses += 1
+
+                        # pandas iterrows()
+                        #for __ind, row in win_data.iterrows():
+                        #    if hbm_intervals.overlaps(row["Vaddr"]):
+                        #        nr_hbm_accesses += 1
+
+                        # Lambda
+                        #win_data.apply(lambda row: is_hbm(nr_hbm_accesses, row["Vaddr"]), axis = 1)
+
+                        # numpy array
+                        for vaddr in win_data["Vaddr"].values:
+                            page_addr = vaddr & (~(PAGE_SIZE - 1))
+                            if hbm_intervals.overlaps(vaddr):
                                 nr_hbm_accesses += 1
-                            nr_accesses += 1
+
+                        #print("iterating phase {}/{} window {} DONE, took: {} secs".format(phase, data["Phase"].iloc[-1], win, time.time() - win_t_s))
 
                         prev_phase_last_ts = win_data["Timestamp"].iloc[-1]
 
@@ -602,11 +627,9 @@ def main():
                     nr_hbm_accesses = 0
                     nr_accesses = 0
                     # Compare pages
-                    for i in range(len(win_data)):
-                        addr = win_data["Vaddr"].iloc[i]
-
+                    for addr in win_data["Vaddr"].values:
                         if args.hbm:
-                            if hbm_intervals.overlaps(win_data["Vaddr"].iloc[i]):
+                            if hbm_intervals.overlaps(addr):
                                 nr_hbm_accesses += 1
 
                         nr_accesses += 1
