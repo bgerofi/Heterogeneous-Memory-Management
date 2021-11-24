@@ -203,7 +203,7 @@ def main():
 
     parser.add_argument('--phases', default=False, action='store_true',
         help='Print a summary of each application phase.')
-    parser.add_argument('--phase', required=False, type=int,
+    parser.add_argument('--phase', required=False, type=int, action='append',
         help='Specify application phase.')
     parser.add_argument('--phase-window', required=False, default=None,
         type=float, help='Phase iteration window length (msecs).')
@@ -253,6 +253,7 @@ def main():
 
     data = None
     data2 = None
+    data3 = None
 
     if not args.csv:
         print("Loading from {}...".format(args.input[0]))
@@ -330,6 +331,7 @@ def main():
                             '0x%x' % interval.end))
 
 
+    '''
     # Runtime estimator
     if args.estimate and not args.compare:
         if data2 is None:
@@ -396,6 +398,7 @@ def main():
             print("Estimated overall runtime: {} msecs".format(t_all))
 
         sys.exit(0)
+    '''
 
     # Traces comparison
     if args.compare:
@@ -414,12 +417,19 @@ def main():
         prev_phase_last_ts = -1
         empty_phase_encountered = False
         # Iterate all phases, but if explicitly requested discard others
-        for phase in range(data["Phase"].iloc[-1] + 1):
-            if args.phase and phase != args.phase:
-                continue
+        if args.phase is not None:
+            phase_list = args.phase
+        else:
+            phase_list = range(data["Phase"].iloc[-1] + 1)
 
+        for phase in phase_list:
             pdata = data[data["Phase"] == int(phase)]
             pdata2 = data2[data2["Phase"] == int(phase)]
+            pdata3 = None
+            if data3 is not None:
+                pdata3 = data3[data3["Phase"] == int(phase)]
+                if len(pdata3) == 0:
+                    pdata3 = None
 
             if len(pdata) == 0 or len(pdata2) == 0:
                 empty_phase_encountered = True
@@ -439,23 +449,33 @@ def main():
                 print("{}: {} accesses in phase {}, time window between {} and {} ({}) msecs, retired instructions: {}".format(
                     args.input[1], len(pdata2), phase, pdata2["Timestamp"].iloc[0], pdata2["Timestamp"].iloc[-1],
                         pdata2["Timestamp"].iloc[-1] - pdata2["Timestamp"].iloc[0], pdata2["Instrs"].iloc[-1]))
+                if pdata3 is not None:
+                    print("{}: {} accesses in phase {}, time window between {} and {} ({}) msecs, retired instructions: {}".format(
+                        args.input[2], len(pdata3), phase, pdata3["Timestamp"].iloc[0], pdata3["Timestamp"].iloc[-1],
+                            pdata3["Timestamp"].iloc[-1] - pdata3["Timestamp"].iloc[0], pdata3["Instrs"].iloc[-1]))
 
             compare_window = args.compare_window_len
             if args.compare_window_unit == "ms":
                 nr_wins = int((pdata["Timestamp"].iloc[-1] - pdata["Timestamp"].iloc[0]) / compare_window)
                 compare_window2 = int((pdata2["Timestamp"].iloc[-1] - pdata2["Timestamp"].iloc[0]) / nr_wins)
+                if pdata3 is not None:
+                    compare_window3 = int((pdata3["Timestamp"].iloc[-1] - pdata3["Timestamp"].iloc[0]) / nr_wins)
 
             elif args.compare_window_unit == "instrs":
                 nr_wins = int((pdata["Instrs"].iloc[-1] - pdata["Instrs"].iloc[0]) / compare_window)
+                if nr_wins == 0:
+                    nr_wins = 1
                 compare_window2 = int((pdata2["Instrs"].iloc[-1] - pdata2["Instrs"].iloc[0]) / nr_wins)
+                if pdata3 is not None:
+                    compare_window3 = int((pdata3["Instrs"].iloc[-1] - pdata3["Instrs"].iloc[0]) / nr_wins)
 
             elif args.compare_window_unit == "accesses":
-                if compare_window > (len(pdata)):
+                nr_wins = int(len(pdata) / compare_window)
+                if nr_wins == 0:
                     nr_wins = 1
-                    compare_window2 = len(pdata2)
-                else:
-                    nr_wins = int(len(pdata) / compare_window)
-                    compare_window2 = int(len(pdata2) / nr_wins)
+                compare_window2 = int(len(pdata2) / nr_wins)
+                if pdata3 is not None:
+                    compare_window3 = int(len(pdata3) / nr_wins)
             else:
                 print("error: invalid compare_window_unit")
                 sys.exit(-1)
@@ -468,6 +488,8 @@ def main():
                     compare_window2,
                     args.compare_window_unit))
 
+            prev_win_last_ts = -1
+            empty_win_encountered = False
             for win in range(nr_wins):
                 pages = {}
                 pages2 = {}
@@ -477,12 +499,45 @@ def main():
                 if args.compare_window_unit == "ms":
                     win_data = pdata[(pdata["Timestamp"] >= (compare_window * win)) & (pdata["Timestamp"] < (compare_window * (win + 1)))]
                     win_data2 = pdata2[(pdata2["Timestamp"] >= (compare_window2 * win)) & (pdata2["Timestamp"] < (compare_window2 * (win + 1)))]
+                    if pdata3 is not None:
+                        win_data3 = pdata3[(pdata3["Timestamp"] >= (compare_window3 * win)) & (pdata3["Timestamp"] < (compare_window3 * (win + 1)))]
+
                 elif args.compare_window_unit == "instrs":
-                    win_data = pdata[(pdata["Instrs"] >= (compare_window * win)) & (pdata["Instrs"] < (compare_window * (win + 1)))]
-                    win_data2 = pdata2[(pdata2["Instrs"] >= (compare_window2 * win)) & (pdata2["Instrs"] < (compare_window2 * (win + 1)))]
+                    if win == nr_wins - 1:
+                        win_data = pdata[(pdata["Instrs"] >= (compare_window * win))]
+                        win_data2 = pdata2[(pdata2["Instrs"] >= (compare_window2 * win))]
+                        if pdata3 is not None:
+                            win_data3 = pdata3[(pdata3["Instrs"] >= (compare_window3 * win))]
+                    else:
+                        win_data = pdata[(pdata["Instrs"] >= (compare_window * win)) & (pdata["Instrs"] < (compare_window * (win + 1)))]
+                        win_data2 = pdata2[(pdata2["Instrs"] >= (compare_window2 * win)) & (pdata2["Instrs"] < (compare_window2 * (win + 1)))]
+                        if pdata3 is not None:
+                            win_data3 = pdata3[(pdata3["Instrs"] >= (compare_window3 * win)) & (pdata3["Instrs"] < (compare_window3 * (win + 1)))]
+
                 elif args.compare_window_unit == "accesses":
-                    win_data = pdata[(compare_window * win):(compare_window * (win + 1))]
-                    win_data2 = pdata2[(compare_window2 * win):(compare_window2 * (win + 1))]
+                    if win == nr_wins - 1:
+                        win_data = pdata[(compare_window * win):]
+                        win_data2 = pdata2[(compare_window2 * win):]
+                        if pdata3 is not None:
+                            win_data3 = pdata3[(compare_window3 * win):]
+                    else:
+                        win_data = pdata[(compare_window * win):(compare_window * (win + 1))]
+                        win_data2 = pdata2[(compare_window2 * win):(compare_window2 * (win + 1))]
+                        if pdata3 is not None:
+                            win_data3 = pdata3[(compare_window3 * win):(compare_window3 * (win + 1))]
+
+                #print("len(win_data): {}, len(win_data2): {}, len(win_data3): {}".format(len(win_data), len(win_data2), len(win_data3)))
+
+                if len(win_data) == 0 or len(win_data2) == 0:
+                    empty_win_encountered = True
+                    if args.verbose:
+                        print("{}: WARNING: no data available in phase {} window {}".format(args.input[0], phase, win))
+                    continue
+
+                if prev_win_last_ts > -1 and empty_win_encountered and args.estimate:
+                    t_all += (win_data["Timestamp"].iloc[0] - prev_win_last_ts)
+                    prev_win_last_ts = -1
+                    empty_win_encountered = False
 
                 interval_pairs = IntervalTree()
 
@@ -582,11 +637,17 @@ def main():
                         if hbm_intervals.overlaps(vaddr):
                             nr_hbm_accesses += 1
 
-                    t2 = win_data2["Timestamp"].iloc[-1] - win_data2["Timestamp"].iloc[0]
                     t = win_data["Timestamp"].iloc[-1] - win_data["Timestamp"].iloc[0]
+                    t2 = win_data2["Timestamp"].iloc[-1] - win_data2["Timestamp"].iloc[0]
+                    if pdata3 is not None and len(win_data3) > 0:
+                        t3 = win_data3["Timestamp"].iloc[-1] - win_data3["Timestamp"].iloc[0]
+                    else:
+                        t3 = 0
 
                     if t > (t2 * 1.03):
                         nr_accesses = len(win_data)
+                        hbm_page_accs = {}
+                        page_accs = {}
 
                         #win_t_s = time.time()
                         #print("iterating phase {}/{} window {}".format(phase, data["Phase"].iloc[-1], win))
@@ -609,16 +670,33 @@ def main():
                             page_addr = vaddr & (~(PAGE_SIZE - 1))
                             if hbm_intervals.overlaps(vaddr):
                                 nr_hbm_accesses += 1
+                            '''
+                                if page_addr in hbm_page_accs:
+                                    hbm_page_accs[page_addr] += 1
+                                else:
+                                    hbm_page_accs[page_addr] = 1
+                            else:
+                                if page_addr in page_accs:
+                                    page_accs[page_addr] += 1
+                                else:
+                                    page_accs[page_addr] = 1
+                            '''
 
                         #print("iterating phase {}/{} window {} DONE, took: {} secs".format(phase, data["Phase"].iloc[-1], win, time.time() - win_t_s))
 
                         prev_phase_last_ts = win_data["Timestamp"].iloc[-1]
+                        prev_win_last_ts = win_data["Timestamp"].iloc[-1]
 
-                        if args.verbose:
-                            print("phase: {}, window: {}: t: {}, t2: {}, nr_hbm_accesses: {}, nr_accesses: {}".format(
-                                phase, win, t, t2, nr_hbm_accesses, nr_accesses))
+                        t_orig = t
                         if t2 < t:
                             t = t - (float(t - t2) * (float(nr_hbm_accesses) / nr_accesses))
+                        if args.verbose:
+                            if pdata3 is not None:
+                                print("phase: {}, window: {}: t: {}, t2: {}, t_measured: {}, t_estimated: {}, nr_hbm_accesses: {}, nr_accesses: {}".format(
+                                    phase, win, t_orig, t2, t3, t, nr_hbm_accesses, nr_accesses))
+                            else:
+                                print("phase: {}, window: {}: t: {}, t2: {}, t_est: {}, nr_hbm_accesses: {}, nr_accesses: {}".format(
+                                    phase, win, t_orig, t2, t, nr_hbm_accesses, nr_accesses))
 
                     t_all += t
 
@@ -684,18 +762,24 @@ def main():
             if not args.csv:
                 print("Estimated overall runtime{}: {} msecs".format(" in phase {}".format(args.phase) if args.phase else "", t_all))
             else:
-                inputs = os.path.basename(args.input[0]).split("-")
-                hbm_postfix = ""
-                for interval in sorted(hbm_intervals):
-                    hbm_postfix += "+HBM-{}-{}".format('0x%x' % interval.begin, '0x%x' % interval.end) 
-                print("{},{},{},{}".format(inputs[1].capitalize(), "Estimated", inputs[0] + hbm_postfix, "%.2f" % t_all))
-
+                est_ratio = -1
                 if len(args.input) == 3:
                     inputs = os.path.basename(args.input[2]).split("-")
                     hbm_postfix = ""
                     for interval in sorted(hbm_intervals):
                         hbm_postfix += "+HBM-{}-{}".format('0x%x' % interval.begin, '0x%x' % interval.end) 
                     print("{},{},{},{}".format(inputs[1].capitalize(), "Measured", inputs[0] + hbm_postfix, "%.2f" % data3["Timestamp"].iloc[-1]))
+                    est_ratio = float(data3["Timestamp"].iloc[-1]) / t_all
+
+                inputs = os.path.basename(args.input[0]).split("-")
+                hbm_postfix = ""
+                for interval in sorted(hbm_intervals):
+                    hbm_postfix += "+HBM-{}-{}".format('0x%x' % interval.begin, '0x%x' % interval.end) 
+                if est_ratio == -1:
+                    print("{},{},{},{}".format(inputs[1].capitalize(), "Estimated", inputs[0] + hbm_postfix, "%.2f" % t_all))
+                else:
+                    print("{},{},{},{},{}".format(inputs[1].capitalize(), "Estimated", inputs[0] + hbm_postfix, "%.2f" % t_all, est_ratio))
+
 
         sys.exit(0)
 
@@ -721,16 +805,24 @@ def main():
 
 
     if (args.phase is not None):
-        if (args.phase > data["Phase"].iloc[-1]):
+        if (args.phase[0] > data["Phase"].iloc[-1]):
             print("error: phase requested..")
             sys.exit(-1)
 
-        data = data[data["Phase"] == int(args.phase)]
+        if len(args.phase) == 1:
+            data = data[data["Phase"] == int(args.phase[0])]
+        else:
+            for p in range(args.phase[0], args.phase[-1] + 1):
+                if p not in args.phase:
+                    print("error: multipe phases must cover a contiguous range")
+                    sys.exit(1)
+            data = data[(data["Phase"] >= int(args.phase[0])) & (data["Phase"] <= int(args.phase[-1]))]
+
         if len(data) == 0:
-            print("error: no data available in phase {}".format(args.phase))
+            print("error: no data available in phase {}".format(args.phase[0]))
             sys.exit(-1)
 
-        print("Using {} accesses in phase {}, time window between {} and {} ({}) msecs, retired instructions: {}".format(
+        print("Using {} accesses in phase(s) {}, time window between {} and {} ({}) msecs, retired instructions: {}".format(
             len(data), args.phase, data["Timestamp"].iloc[0], data["Timestamp"].iloc[-1],
                 data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0], data["Instrs"].iloc[-1]))
 
