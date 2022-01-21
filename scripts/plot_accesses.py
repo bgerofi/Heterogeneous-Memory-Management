@@ -63,7 +63,7 @@ def plot_to_file_init(nr_rows, height_ratios, msecs):
         return
 
     print("Initializing plot for {} subplots...".format(nr_rows))
-    fig, axes = plt.subplots(nr_rows, 1, figsize=(4 + int(2 * msecs / 1000), 10), sharex=True,
+    fig, axes = plt.subplots(nr_rows, 1, figsize=(4 + int(2 * msecs / 100), 10), sharex=True,
         gridspec_kw = {'height_ratios': height_ratios})
     if nr_rows == 1:
         axes = [axes]
@@ -81,7 +81,7 @@ def plot_to_file_add_subplot(row, data, interval_len, msecs_total):
     #ax.set_xlabel('Duration')
     #plt.locator_params(axis="x", nbins=1000)
     #axes[row].set_ylabel('vaddr ({})'.format(int(interval_len / 4096)), size=16)
-    axes[row].set_ylabel('{}'.format(int(interval_len / 4096)), size=16)
+    axes[row].set_ylabel('VA [{} pages]'.format(int(interval_len / 4096)), size=16)
     axes[row].set_xlabel('Time (msecs) [{} msecs]'.format(int(msecs_total)), size=16)
     #plt.ylim(fom_min - 0.0025, fom_max + 0.0025)
 
@@ -237,6 +237,8 @@ def main():
     parser.add_argument('--min-accesses', required=False, default=100,
         type=int, help='Minimum number of accesses in a cluster/interval to plot.')
 
+    parser.add_argument('--hbm-factor', required=False, default=1.0,
+        type=float, help='HBM weight factor.')
     parser.add_argument("--hbm", type=str, required=False,
         action='append',
         help=("Memory ranges that are placed in high-bandwidth memory (e.g., 0x2aaaf9144000-0x2aaafabd0000)"))
@@ -299,6 +301,7 @@ def main():
 
 
     hbm_intervals = IntervalTree()
+    hbm_perc = 0
     if args.hbm:
         for i in range(len(args.hbm)):
             addrs_s = args.hbm[i].split("-")
@@ -308,13 +311,19 @@ def main():
 
             low = auto_int(addrs_s[0])
             high = auto_int(addrs_s[1])
-            hbm_intervals[low:high] = None
+            if high == 100:
+                hbm_perc = low
+            else:
+                hbm_intervals[low:high] = None
         hbm_intervals.merge_overlaps()
         if not args.csv:
-            for interval in sorted(hbm_intervals):
-                print("HBM range: {}-{}".format(
-                            '0x%x' % interval.begin,
-                            '0x%x' % interval.end))
+            if hbm_perc > 0:
+                print("HBM: {}%%".format(hbm_perc))
+            else:
+                for interval in sorted(hbm_intervals):
+                    print("HBM range: {}-{}".format(
+                                '0x%x' % interval.begin,
+                                '0x%x' % interval.end))
 
     if len(args.input) == 3:
         inputs = os.path.basename(args.input[2]).split("-")
@@ -322,13 +331,19 @@ def main():
             if inputs[i] == "HBM":
                 low = auto_int(inputs[i+1])
                 high = auto_int(inputs[i+2])
-                hbm_intervals[low:high] = None
+                if high == 100:
+                    hbm_perc = low
+                else:
+                    hbm_intervals[low:high] = None
 
         if not args.csv:
-            for interval in sorted(hbm_intervals):
-                print("HBM range: {}-{}".format(
-                            '0x%x' % interval.begin,
-                            '0x%x' % interval.end))
+            if hbm_perc > 0:
+                print("HBM: {}%%".format(hbm_perc))
+            else:
+                for interval in sorted(hbm_intervals):
+                    print("HBM range: {}-{}".format(
+                                '0x%x' % interval.begin,
+                                '0x%x' % interval.end))
 
 
     '''
@@ -404,8 +419,10 @@ def main():
     if args.compare:
         # Estimated overall runtime (if estimating)
         t_all = 0
+        t_measured_all = 0
         PAGE_SIZE = 32768
         PAGE_SIZE = 65536
+        csv_estimate_postfix = " (Phasemarked)"
         if len(args.input) < 2:
             print("error: you must specify two traces when comparing..")
             sys.exit(-1)
@@ -413,6 +430,58 @@ def main():
         if data2 is None:
             print("error: you must specify two input files for comparison")
             sys.exit(-1)
+
+        # Convert traces to a single phase if args.phase == [-1]:
+        if args.phase and len(args.phase) == 1 and args.phase[0] == -1:
+            t_s = time.time()
+            '''
+            cumm_instr = 0
+            prev_instr = 0
+            prev_phase = -1
+            for i in data.index:
+                if data.at[i, "Phase"] != prev_phase:
+                    cumm_instr += prev_instr
+
+                prev_instr = data.at[i, "Instrs"]
+                data.at[i, "Instrs"] += cumm_instr
+                prev_phase = data.at[i, "Phase"]
+                data.at[i, "Phase"] = 0
+
+            cumm_instr = 0
+            prev_instr = 0
+            prev_phase = -1
+            for i in data2.index:
+                if data2.at[i, "Phase"] != prev_phase:
+                    cumm_instr += prev_instr
+
+                prev_instr = data2.at[i, "Instrs"]
+                data2.at[i, "Instrs"] += cumm_instr
+                prev_phase = data2.at[i, "Phase"]
+                data2.at[i, "Phase"] = 0
+
+            if data3 is not None:
+                cumm_instr = 0
+                prev_instr = 0
+                prev_phase = -1
+                for i in data3.index:
+                    if data3.at[i, "Phase"] != prev_phase:
+                        cumm_instr += prev_instr
+
+                    prev_instr = data3.at[i, "Instrs"]
+                    data3.at[i, "Instrs"] += cumm_instr
+                    prev_phase = data3.at[i, "Phase"]
+                    data3.at[i, "Phase"] = 0
+            '''
+            data = data.assign(Phase=0)
+            data2 = data2.assign(Phase=0)
+            if data3 is not None:
+                data3 = data3.assign(Phase=0)
+            args.phase[0] = 0
+            csv_estimate_postfix = ""
+            t_e = time.time()
+
+            #print("Conversion took {} seconds..".format(t_e - t_s))
+
 
         prev_phase_last_ts = -1
         empty_phase_encountered = False
@@ -423,13 +492,18 @@ def main():
             phase_list = range(data["Phase"].iloc[-1] + 1)
 
         for phase in phase_list:
-            pdata = data[data["Phase"] == int(phase)]
-            pdata2 = data2[data2["Phase"] == int(phase)]
+            condition = data.Phase == int(phase)
+            pdata = data[condition]
+            condition = data2.Phase == int(phase)
+            pdata2 = data2[condition]
             pdata3 = None
             if data3 is not None:
-                pdata3 = data3[data3["Phase"] == int(phase)]
+                condition = data3.Phase == int(phase)
+                pdata3 = data3[condition]
                 if len(pdata3) == 0:
                     pdata3 = None
+                else:
+                    t_measured_all += (pdata3["Timestamp"].iloc[-1] - pdata3["Timestamp"].iloc[0])
 
             if len(pdata) == 0 or len(pdata2) == 0:
                 empty_phase_encountered = True
@@ -443,16 +517,19 @@ def main():
                 empty_phase_encountered = False
 
             if args.verbose:
-                print("{}: {} accesses in phase {}, time window between {} and {} ({}) msecs, retired instructions: {}".format(
+                print("{}: {} accesses in phase {}, time window between {} and {} ({}) msecs, retired instructions: {}, mem/instr: {}".format(
                     args.input[0], len(pdata), phase, pdata["Timestamp"].iloc[0], pdata["Timestamp"].iloc[-1],
-                        pdata["Timestamp"].iloc[-1] - pdata["Timestamp"].iloc[0], pdata["Instrs"].iloc[-1]))
-                print("{}: {} accesses in phase {}, time window between {} and {} ({}) msecs, retired instructions: {}".format(
+                        pdata["Timestamp"].iloc[-1] - pdata["Timestamp"].iloc[0], pdata["Instrs"].iloc[-1],
+                        len(pdata) * 8 / pdata["Instrs"].iloc[-1]))
+                print("{}: {} accesses in phase {}, time window between {} and {} ({}) msecs, retired instructions: {}, mem/instr: {}".format(
                     args.input[1], len(pdata2), phase, pdata2["Timestamp"].iloc[0], pdata2["Timestamp"].iloc[-1],
-                        pdata2["Timestamp"].iloc[-1] - pdata2["Timestamp"].iloc[0], pdata2["Instrs"].iloc[-1]))
+                        pdata2["Timestamp"].iloc[-1] - pdata2["Timestamp"].iloc[0], pdata2["Instrs"].iloc[-1],
+                        len(pdata2) * 8 / pdata2["Instrs"].iloc[-1]))
                 if pdata3 is not None:
-                    print("{}: {} accesses in phase {}, time window between {} and {} ({}) msecs, retired instructions: {}".format(
+                    print("{}: {} accesses in phase {}, time window between {} and {} ({}) msecs, retired instructions: {}, mem/instr: {}".format(
                         args.input[2], len(pdata3), phase, pdata3["Timestamp"].iloc[0], pdata3["Timestamp"].iloc[-1],
-                            pdata3["Timestamp"].iloc[-1] - pdata3["Timestamp"].iloc[0], pdata3["Instrs"].iloc[-1]))
+                            pdata3["Timestamp"].iloc[-1] - pdata3["Timestamp"].iloc[0], pdata3["Instrs"].iloc[-1],
+                            len(pdata3) * 8 / pdata3["Instrs"].iloc[-1]))
 
             compare_window = args.compare_window_len
             if args.compare_window_unit == "ms":
@@ -630,12 +707,17 @@ def main():
                 # Runtime estimate?
                 if args.estimate:
                     PAGE_SIZE = 4096
+                    PAGE_SHIFT = 12
                     nr_hbm_accesses = 0
                     nr_accesses = 0
 
                     def is_hbm(nr_hbm_accesses, vaddr):
-                        if hbm_intervals.overlaps(vaddr):
-                            nr_hbm_accesses += 1
+                        if hbm_perc > 0:
+                            if ((vaddr >> PAGE_SHIFT) % 100 <= hbm_perc):
+                                nr_hbm_accesses += 1
+                        else:
+                            if hbm_intervals.overlaps(vaddr):
+                                nr_hbm_accesses += 1
 
                     t = win_data["Timestamp"].iloc[-1] - win_data["Timestamp"].iloc[0]
                     t2 = win_data2["Timestamp"].iloc[-1] - win_data2["Timestamp"].iloc[0]
@@ -668,9 +750,10 @@ def main():
                         # numpy array
                         for vaddr in win_data["Vaddr"].values:
                             page_addr = vaddr & (~(PAGE_SIZE - 1))
-                            if hbm_intervals.overlaps(vaddr):
+                            if ((hbm_perc > 0 and ((page_addr >> PAGE_SHIFT) % 100 <= hbm_perc)) or
+                                    hbm_intervals.overlaps(page_addr)):
                                 nr_hbm_accesses += 1
-                            '''
+
                                 if page_addr in hbm_page_accs:
                                     hbm_page_accs[page_addr] += 1
                                 else:
@@ -680,7 +763,17 @@ def main():
                                     page_accs[page_addr] += 1
                                 else:
                                     page_accs[page_addr] = 1
-                            '''
+
+                        nr_accesses = 0
+                        nr_hbm_accesses = 0.0
+                        for p in hbm_page_accs.values():
+                            nr_hbm_accesses += (float(args.hbm_factor) * p)
+
+                        for p in page_accs.values():
+                            nr_accesses += p
+
+                        nr_accesses += nr_hbm_accesses
+
 
                         #print("iterating phase {}/{} window {} DONE, took: {} secs".format(phase, data["Phase"].iloc[-1], win, time.time() - win_t_s))
 
@@ -697,6 +790,7 @@ def main():
                             else:
                                 print("phase: {}, window: {}: t: {}, t2: {}, t_est: {}, nr_hbm_accesses: {}, nr_accesses: {}".format(
                                     phase, win, t_orig, t2, t, nr_hbm_accesses, nr_accesses))
+                            print("")
 
                     t_all += t
 
@@ -707,8 +801,12 @@ def main():
                     # Compare pages
                     for addr in win_data["Vaddr"].values:
                         if args.hbm:
-                            if hbm_intervals.overlaps(addr):
-                                nr_hbm_accesses += 1
+                            if hbm_perc > 0:
+                                if ((addr >> PAGE_SHIFT) % 100) <= hbm_perc:
+                                    nr_hbm_accesses += 1
+                            else:
+                                if hbm_intervals.overlaps(addr):
+                                    nr_hbm_accesses += 1
 
                         nr_accesses += 1
 
@@ -760,46 +858,37 @@ def main():
 
         if args.estimate:
             if not args.csv:
-                print("Estimated overall runtime{}: {} msecs".format(" in phase {}".format(args.phase) if args.phase else "", t_all))
+                if t_measured_all > 0:
+                    print("Estimated overall runtime{}: {} msecs, measured: {}".format(" in phase {}".format(args.phase) if args.phase else "", t_all, t_measured_all))
+                else:
+                    print("Estimated overall runtime{}: {} msecs".format(" in phase {}".format(args.phase) if args.phase else "", t_all))
             else:
                 est_ratio = -1
                 if len(args.input) == 3:
                     inputs = os.path.basename(args.input[2]).split("-")
                     hbm_postfix = ""
-                    for interval in sorted(hbm_intervals):
-                        hbm_postfix += "+HBM-{}-{}".format('0x%x' % interval.begin, '0x%x' % interval.end) 
-                    print("{},{},{},{}".format(inputs[1].capitalize(), "Measured", inputs[0] + hbm_postfix, "%.2f" % data3["Timestamp"].iloc[-1]))
+                    if hbm_perc > 0:
+                        hbm_postfix = "+HBM-{}".format(hbm_perc)
+                    else:
+                        for interval in sorted(hbm_intervals):
+                            hbm_postfix += "+HBM-{}-{}".format('0x%x' % interval.begin, '0x%x' % interval.end) 
+                    print("{},{},{},{},".format(inputs[1].capitalize(), "Measured", inputs[0] + hbm_postfix, "%.2f" % data3["Timestamp"].iloc[-1]))
                     est_ratio = float(data3["Timestamp"].iloc[-1]) / t_all
 
                 inputs = os.path.basename(args.input[0]).split("-")
                 hbm_postfix = ""
-                for interval in sorted(hbm_intervals):
-                    hbm_postfix += "+HBM-{}-{}".format('0x%x' % interval.begin, '0x%x' % interval.end) 
-                if est_ratio == -1:
-                    print("{},{},{},{}".format(inputs[1].capitalize(), "Estimated", inputs[0] + hbm_postfix, "%.2f" % t_all))
+                if hbm_perc > 0:
+                    hbm_postfix = "+HBM-{}".format(hbm_perc)
                 else:
-                    print("{},{},{},{},{}".format(inputs[1].capitalize(), "Estimated", inputs[0] + hbm_postfix, "%.2f" % t_all, est_ratio))
+                    for interval in sorted(hbm_intervals):
+                        hbm_postfix += "+HBM-{}-{}".format('0x%x' % interval.begin, '0x%x' % interval.end) 
+                if est_ratio == -1:
+                    print("{},{},{},{},".format(inputs[1].capitalize(), "Estimated" + csv_estimate_postfix, inputs[0] + hbm_postfix, "%.2f" % t_all))
+                else:
+                    print("{},{},{},{},{}".format(inputs[1].capitalize(), "Estimated" + csv_estimate_postfix, inputs[0] + hbm_postfix, "%.2f" % t_all, est_ratio))
 
 
         sys.exit(0)
-
-
-    if args.phases:
-        for p in range(data["Phase"].iloc[-1]):
-            __data = data[data["Phase"] == p]
-            if len(__data) == 0:
-                continue
-
-            print("Phase {}: {} accesses between {} and {} ({}) msecs, retired instructions: {}".format(
-                        p,
-                        len(__data),
-                        int(__data["Timestamp"].iloc[0]),
-                        int(__data["Timestamp"].iloc[-1]),
-                        float(__data["Timestamp"].iloc[-1] - __data["Timestamp"].iloc[0]),
-                        __data["Instrs"].iloc[-1]))
-
-        sys.exit(0)
-
 
 
 
@@ -843,6 +932,25 @@ def main():
                     print("{}-{}: {} instrs, {} instrs / msec".format(prev_ts, ts, int(instr - prev_instr), float(instr - prev_instr) / (ts - prev_ts)))
                     prev_instr = instr
                     prev_ts = ts
+
+
+    if args.phases:
+        for p in range(data["Phase"].iloc[-1] + 1):
+            condition = data["Phase"] == p
+            __data = data[condition]
+            if len(__data) == 0:
+                continue
+
+            print("Phase {}: {} accesses between {} and {} ({}) msecs, retired instructions: {}".format(
+                        p,
+                        len(__data),
+                        int(__data["Timestamp"].iloc[0]),
+                        int(__data["Timestamp"].iloc[-1]),
+                        float(__data["Timestamp"].iloc[-1] - __data["Timestamp"].iloc[0]),
+                        __data["Instrs"].iloc[-1]))
+
+        sys.exit(0)
+
 
 
 
@@ -988,7 +1096,7 @@ def main():
         for i in range(len(inputs)):
             if inputs[i] == "HBM":
                 hbm_postfix += "+HBM-{}-{}".format(inputs[i+1], inputs[i+2])
-        print("{},{},{},{}".format(inputs[1].capitalize(), "Measured", inputs[0] + hbm_postfix, "%.2f" % data["Timestamp"].iloc[-1]))
+        print("{},{},{},{},".format(inputs[1].capitalize(), "Measured", inputs[0] + hbm_postfix, "%.2f" % data["Timestamp"].iloc[-1]))
 
 
 if __name__ == "__main__":
