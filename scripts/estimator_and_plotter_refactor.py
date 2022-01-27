@@ -44,6 +44,21 @@ class Memory:
             intervals.merge_overlaps(data_reducer = lambda a,b: a+b)
         return intervals
 
+class Trace:
+    def __init__(self, filename, verbose=True):
+        if verbose:
+            print("Loading from {}...".format(filename))
+        self.data = pd.read_feather(args.input[0])
+        self.data["Timestamp"] = data["Timestamp"].div(args.cpu_cycles_per_ms)
+
+    def singlify_phases(self):
+        self.data.assign(Phase=0)
+
+    def print_info(self):
+        print("Loaded {} accesses ({} phases) between {} and {} msecs".format(
+            len(trace), trace["Phase"].iloc[-1], trace["Timestamp"].iloc[0],
+            trace["Timestamp"].iloc[-1]))
+
 def main():
     global args
 
@@ -124,48 +139,17 @@ def main():
     #sns.set_theme()
     sns.set_style("whitegrid")
 
-    data = None
-    data2 = None
-    data3 = None
-
-    if not args.csv:
-        print("Loading from {}...".format(args.input[0]))
-    data = pd.read_feather(args.input[0])
-
     # Handle time window
     #data = data.set_index("Nodes")
-    data["Timestamp"] = data["Timestamp"].div(args.cpu_cycles_per_ms)
+    data = Trace(args.input[0])
     if not args.csv:
-        print("Loaded {} accesses ({} phases) between {} and {} msecs from {}".format(
-            len(data),
-            data["Phase"].iloc[-1],
-            data["Timestamp"].iloc[0],
-            data["Timestamp"].iloc[-1],
-            args.input[0]))
-
-    if len(args.input) > 1:
-        if not args.csv:
-            print("Loading from {}...".format(args.input[1]))
-        data2 = pd.read_feather(args.input[1])
-        data2["Timestamp"] = data2["Timestamp"].div(args.cpu_cycles_per_ms)
-        if not args.csv:
-            print("Loaded {} accesses between {} and {} msecs from {}".format(
-                len(data2),
-                data2["Timestamp"].iloc[0],
-                data2["Timestamp"].iloc[-1],
-                args.input[1]))
-
-    if len(args.input) > 2:
-        if not args.csv:
-            print("Loading from {}...".format(args.input[2]))
-        data3 = pd.read_feather(args.input[2])
-        data3["Timestamp"] = data3["Timestamp"].div(args.cpu_cycles_per_ms)
-        if not args.csv:
-            print("Loaded {} accesses between {} and {} msecs from {}".format(
-                len(data3),
-                data3["Timestamp"].iloc[0],
-                data3["Timestamp"].iloc[-1],
-                args.input[2]))
+        data.print_info()
+    data2 = Trace(args.input[1], args.phase) if len(args.input) > 1 else None
+    if data2 is not None and not args.csv:
+        data2.print_info()
+    data3 = Trace(args.input[2], args.phase) if len(args.input) > 2 else None
+    if data3 is not None and not args.csv:
+        data3.print_info()
 
     if args.compare_phase:
         sys.exit(0)
