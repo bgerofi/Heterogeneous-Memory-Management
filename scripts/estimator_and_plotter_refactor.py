@@ -19,26 +19,30 @@ def to_hex(x, pos):
 def auto_int(x):
     return int(x, 0)
 
-def detect_intervals(data, verbose = True):
-    PAGE_SIZE = 8192
-    def plus(a, b):
-        return a + b
+class Memory:
+    # The size of page: 8192 (Bits).
+    PAGE_SIZE=1<<13
+    # Mask to get the page low_vaddr.
+    PAGE_MASK=~(PAGE_SIZE-1)
 
-    intervals = IntervalTree()
+    def _page_low_addr_(vaddr):
+        return Memory.PAGE_MASK & vaddr
+    def _interval_low_addr_(vaddr, interval_distance):
+        return Memory._page_low_addr_(vaddr) - interval_distance * Memory.PAGE_SIZE
+    def _interval_high_addr_(vaddr, interval_distance):
+        return Memory._page_low_addr_(vaddr + interval_distance * Memory.PAGE_SIZE)
 
-    if args.interval_distance is None:
-        print("error: you must specify --interval-distance when detecting intervals")
-        sys.exit(-1)
-
-    if verbose:
-        print("Detecting address intervals...")
-    for vaddr in data["Vaddr"].values:
-        # Align to page size
-        low_vaddr = (vaddr & (~(PAGE_SIZE - 1))) - (args.interval_distance * PAGE_SIZE)
-        high_vaddr = (vaddr + (args.interval_distance * PAGE_SIZE)) & (~(PAGE_SIZE - 1))
-        intervals[low_vaddr:high_vaddr] = 1
-        intervals.merge_overlaps(data_reducer = plus)
-    return intervals
+    def detect_intervals(address_list, interval_distance, verbose=False):
+        intervals = IntervalTree()
+        if verbose:
+            print("Detecting address intervals...")
+        for vaddr in address_list:
+            # Align to page size
+            low_vaddr = Memory.interval_low_addr(vaddr, interval_distance)
+            high_vaddr = Memory.interval_high_addr(vaddr, interval_distance)
+            intervals[low_vaddr:high_vaddr] = 1
+            intervals.merge_overlaps(data_reducer = lambda a,b: a+b)
+        return intervals
 
 def main():
     global args
@@ -112,6 +116,10 @@ def main():
         help="Output results in CSV format")
 
     args = parser.parse_args()
+
+    if args.detect_intervals and args.interval_distance is None:
+        print("error: you must specify --interval-distance when detecting intervals")
+        sys.exit(-1)
 
     #sns.set_theme()
     sns.set_style("whitegrid")
@@ -482,9 +490,10 @@ def main():
                 interval_pairs = IntervalTree()
 
                 if args.detect_intervals:
-                    intervals = detect_intervals(win_data, verbose = False)
-                    intervals2 = detect_intervals(win_data2, verbose = False)
-
+                    intervals = Memory.detect_intervals(win_data["Vaddr"].values,
+                                                        args.interval_distance)
+                    intervals2 = Memory.detect_intervals(win_data2["Vaddr"].values,
+                                                         args.interval_distance)
                     nr_accs = []
                     for interval in intervals:
                         nr_accs.append(interval.data)
@@ -903,8 +912,8 @@ def main():
 
     # Interval tree based VM ranges
     if args.detect_intervals:
-        detect_intervals(data)
-
+        Memory.detect_intervals(data["Vaddr"].values,
+                                args.interval_distance, verbose=True)
         sys.exit(0)
 
 
