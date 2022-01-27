@@ -3,21 +3,12 @@ import sys
 import os
 import pandas as pd
 import numpy as np
-import seaborn as sns
 import argparse
 from sklearn.cluster import KMeans
 from kneed import KneeLocator
 from intervaltree import Interval, IntervalTree
 import importlib
 import time
-
-args = None
-
-def to_hex(x, pos):
-    return '0x%x' % int(x)
-
-def auto_int(x):
-    return int(x, 0)
 
 class Memory:
     # The size of page: 8192 (Bits).
@@ -44,12 +35,45 @@ class Memory:
             intervals.merge_overlaps(data_reducer = lambda a,b: a+b)
         return intervals
 
+    def print_intervals(intervals, prefix=""):
+        print('\n'.join([ '{}{}:{}'.format(prefix, '0x%x'%i.begin, '0x%x'%i.end) for i in sorted(intervals) ]))
+
+class Parser:
+    def parse_addr(addr):
+        try:
+            return int(addr, 0)
+        except ValueError:
+            raise ValueError("Invalid address format: {}.\nExpected: '<hex>'".format(addr))
+
+    def parse_interval(interval):
+        intrvl = interval.split(':')
+        if len(intrvl) != 2:
+            raise ValueError("Invalid interval format {}.\nExpected '<hex>:<hex>'".format(interval))
+        low = Parse.parse_addr(intrvl[0])
+        high = Parse.parse_addr(intrvl[1])
+        return (low, high) if low < high else (high, low)
+
+    def parse_intervals(intervals):
+        intrvls = IntervalTree()
+        for i in intervals:
+            low, high = Parse.parse_interval(i)
+            intrvls[low:high] = None
+        intrvls.merge_overlaps()
+        return intrvls
+
+    def parse_name_intervals(name):
+        inputs = os.path.basename(name).split("-")
+        inputs = [ '{}:{}'.format(inputs[i+1], inputs[i+2]) \
+                   for i in inputs[::3] if i == "HBM" ]
+        return Parse.parse_intervals(inputs)
+
 class Trace:
-    def __init__(self, filename, verbose=True):
+    def __init__(self, filename, cpu_cycles_per_ms, verbose=True):
         if verbose:
             print("Loading from {}...".format(filename))
-        self.data = pd.read_feather(args.input[0])
-        self.data["Timestamp"] = data["Timestamp"].div(args.cpu_cycles_per_ms)
+        self.data = pd.read_feather(filename)
+        self.data["Timestamp"] = data["Timestamp"].div(cpu_cycles_per_ms)
+        self.filename = filename
 
     def singlify_phases(self):
         self.data.assign(Phase=0)
@@ -60,8 +84,6 @@ class Trace:
             trace["Timestamp"].iloc[-1]))
 
 def main():
-    global args
-
     vhex = np.vectorize(hex)
     parser = argparse.ArgumentParser()
     parser.add_argument("-i", "--input", type=str, required=True,
@@ -78,10 +100,10 @@ def main():
         type=int, help='CPU cycles per millisecond (default: 1,400,000 for KNL).')
 
     parser.add_argument('-L', '--low-vaddr', required=False,
-        type=auto_int,
+        type=Parser.parse_addr,
         help='Low virtual address.')
     parser.add_argument('-H', '--high-vaddr', required=False,
-        type=auto_int,
+        type=Parser.parse_addr,
         help='High virtual address.')
 
     parser.add_argument('--phases', default=False, action='store_true',
@@ -136,70 +158,28 @@ def main():
         print("error: you must specify --interval-distance when detecting intervals")
         sys.exit(-1)
 
-    #sns.set_theme()
-    sns.set_style("whitegrid")
-
-    # Handle time window
-    #data = data.set_index("Nodes")
-    data = Trace(args.input[0])
+    # Load traces
+    data = Trace(args.input[0], args.cpu_cycles_per_ms)
     if not args.csv:
         data.print_info()
-    data2 = Trace(args.input[1], args.phase) if len(args.input) > 1 else None
+    data2 = Trace(args.input[1], args.cpu_cycles_per_ms) if len(args.input) > 1 else None
     if data2 is not None and not args.csv:
         data2.print_info()
-    data3 = Trace(args.input[2], args.phase) if len(args.input) > 2 else None
+    data3 = Trace(args.input[2], args.cpu_cycles_per_ms) if len(args.input) > 2 else None
     if data3 is not None and not args.csv:
         data3.print_info()
 
+    # Compute hbm intervals.
+    hbm_intervals = IntervalTree()
+    if args.hbm is not None:
+        hbm_intervals.update(Parse.parse_intervals(args.hbm))
+    if data3 is not None:
+        hbm_intervals.update(Parse.parse_name_intervals(data3.filename))
+    if not args.csv:
+        Memory.print_intervals(hbm_intervals, 'HBM range: ')
+        
     if args.compare_phase:
         sys.exit(0)
-
-
-    hbm_intervals = IntervalTree()
-    hbm_perc = 0
-    if args.hbm:
-        for i in range(len(args.hbm)):
-            addrs_s = args.hbm[i].split("-")
-            if len(addrs_s) < 2:
-                print("error: invalid --hbm argument: {}".format(args.hbm[i]))
-                sys.exit(-1)
-
-            low = auto_int(addrs_s[0])
-            high = auto_int(addrs_s[1])
-            if high == 100:
-                hbm_perc = low
-            else:
-                hbm_intervals[low:high] = None
-        hbm_intervals.merge_overlaps()
-        if not args.csv:
-            if hbm_perc > 0:
-                print("HBM: {}%%".format(hbm_perc))
-            else:
-                for interval in sorted(hbm_intervals):
-                    print("HBM range: {}-{}".format(
-                                '0x%x' % interval.begin,
-                                '0x%x' % interval.end))
-
-    if len(args.input) == 3:
-        inputs = os.path.basename(args.input[2]).split("-")
-        for i in range(len(inputs)):
-            if inputs[i] == "HBM":
-                low = auto_int(inputs[i+1])
-                high = auto_int(inputs[i+2])
-                if high == 100:
-                    hbm_perc = low
-                else:
-                    hbm_intervals[low:high] = None
-
-        if not args.csv:
-            if hbm_perc > 0:
-                print("HBM: {}%%".format(hbm_perc))
-            else:
-                for interval in sorted(hbm_intervals):
-                    print("HBM range: {}-{}".format(
-                                '0x%x' % interval.begin,
-                                '0x%x' % interval.end))
-
 
     '''
     # Runtime estimator
