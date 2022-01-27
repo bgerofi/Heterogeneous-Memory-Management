@@ -3,9 +3,6 @@ import sys
 import os
 import pandas as pd
 import numpy as np
-import matplotlib
-from matplotlib import pyplot as plt
-import matplotlib.ticker as ticker
 import seaborn as sns
 import argparse
 from sklearn.cluster import KMeans
@@ -14,8 +11,6 @@ from intervaltree import Interval, IntervalTree
 import importlib
 import time
 
-fig = None
-axes = None
 args = None
 
 def to_hex(x, pos):
@@ -23,82 +18,6 @@ def to_hex(x, pos):
 
 def auto_int(x):
     return int(x, 0)
-
-def plot_to_file(data, output):
-    print("Generating plot...")
-    #plt.xticks(rotation=45, size=16)
-    #plt.yticks(size=16)
-    #plt.rcParams["figure.figsize"] = (8, 4)
-    plt.figure(figsize=(20,5))
-    ax = sns.histplot(data, x="Timestamp", y="Vaddr", bins=250);
-    #ax.set_yscale('log')
-    #fig, ax = plt.subplots()
-    #ax.bar(data[0], data[1], color='green')
-    #ax.set_xlabel('Duration')
-    ax.set_xlabel('Time (msec)', size=18)
-    #plt.locator_params(axis="x", nbins=1000)
-    ax.set_ylabel('Virtual address', size=18)
-    #plt.ylim(fom_min - 0.0025, fom_max + 0.0025)
-
-    fmt = ticker.FuncFormatter(to_hex)
-    axes = plt.gca()
-    #axes.get_yaxis().set_major_locator(ticker.MultipleLocator(1))
-    axes.get_yaxis().set_major_formatter(fmt)
-
-    print("Saving to: {}".format(output))
-    plt.tight_layout()
-    plt.savefig(output)
-    #plt.close()
-
-    importlib.reload(matplotlib)
-    importlib.reload(sns)
-
-
-
-def plot_to_file_init(nr_rows, height_ratios, msecs):
-    global fig
-    global axes
-
-    if nr_rows == 0:
-        return
-
-    print("Initializing plot for {} subplots...".format(nr_rows))
-    fig, axes = plt.subplots(nr_rows, 1, figsize=(4 + int(2 * msecs / 100), 10), sharex=True,
-        gridspec_kw = {'height_ratios': height_ratios})
-    if nr_rows == 1:
-        axes = [axes]
-
-
-def plot_to_file_add_subplot(row, data, interval_len, msecs_total):
-    global fig
-    global axes
-    #print("Generating subplot for row {}...".format(row))
-
-    sns.histplot(ax=axes[row], data=data, x="Timestamp", y="Vaddr", bins=150);
-    #ax.set_yscale('log')
-    #fig, ax = plt.subplots()
-    #ax.bar(data[0], data[1], color='green')
-    #ax.set_xlabel('Duration')
-    #plt.locator_params(axis="x", nbins=1000)
-    #axes[row].set_ylabel('vaddr ({})'.format(int(interval_len / 4096)), size=16)
-    axes[row].set_ylabel('VA [{} pages]'.format(int(interval_len / 4096)), size=16)
-    axes[row].set_xlabel('Time (msecs) [{} msecs]'.format(int(msecs_total)), size=16)
-    #plt.ylim(fom_min - 0.0025, fom_max + 0.0025)
-
-    fmt = ticker.FuncFormatter(to_hex)
-    #axes.get_yaxis().set_major_locator(ticker.MultipleLocator(1))
-    axes[row].get_yaxis().set_major_formatter(fmt)
-
-
-def plot_to_file_finalize(output):
-    print("Saving to: {}".format(output))
-    plt.tight_layout()
-    plt.savefig(output)
-    #plt.close()
-
-    importlib.reload(matplotlib)
-    importlib.reload(sns)
-
 
 def detect_intervals(data, verbose = True):
     PAGE_SIZE = 8192
@@ -119,62 +38,7 @@ def detect_intervals(data, verbose = True):
         high_vaddr = (vaddr + (args.interval_distance * PAGE_SIZE)) & (~(PAGE_SIZE - 1))
         intervals[low_vaddr:high_vaddr] = 1
         intervals.merge_overlaps(data_reducer = plus)
-
-    nr_valid_intervals = 0
-    height_ratios = []
-    if args.plot:
-        for interval in sorted(intervals):
-            low_vaddr = interval.begin
-            high_vaddr = interval.end
-            plotdata = data.copy()
-            plotdata = plotdata[plotdata["Vaddr"] >= low_vaddr]
-            plotdata = plotdata[plotdata["Vaddr"] <= high_vaddr]
-            if len(plotdata) < args.min_accesses:
-                continue
-
-            nr_valid_intervals += 1
-            height_ratios.insert(0, high_vaddr - low_vaddr)
-
-        plot_to_file_init(nr_valid_intervals, height_ratios, (data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0]))
-
-    if verbose or args.plot:
-        ind = 1
-        for interval in sorted(intervals):
-            low_vaddr = interval.begin
-            high_vaddr = interval.end
-            plotdata = data.copy()
-            plotdata = plotdata[plotdata["Vaddr"] >= low_vaddr]
-            plotdata = plotdata[plotdata["Vaddr"] <= high_vaddr]
-            if len(plotdata) < args.min_accesses:
-                continue
-
-            if verbose:
-                print("Virtual range: {} - {} ({} pages), nr accesses: {}".format(
-                    '0x%x' % interval.begin,
-                    '0x%x' % interval.end,
-                    (interval.end - interval.begin) / 4096,
-                    len(plotdata)))
-
-            if args.plot:
-                plot_to_file_add_subplot(nr_valid_intervals - ind,
-                        plotdata, high_vaddr - low_vaddr,
-                        (data["Timestamp"].iloc[-1] - data["Timestamp"].iloc[0]))
-            ind += 1
-
-    if args.plot and nr_valid_intervals > 0:
-        outfile = args.input[0]
-
-        if (args.start_timestamp is not None and
-            args.end_timestamp is not None):
-            outfile = "{}-{}-{}".format(outfile, args.start_timestamp, args.end_timestamp)
-
-        if args.phase is not None:
-            outfile = "{}-phase-{}".format(outfile, args.phase)
-        outfile = "{}-intervals.pdf".format(outfile)
-        plot_to_file_finalize(outfile)
-
     return intervals
-
 
 def main():
     global args
@@ -233,7 +97,6 @@ def main():
     parser.add_argument('--cluster-width', required=False,
         type=int, help='Cluster width in number of pages (4kB sized).')
 
-    parser.add_argument('--plot', default=False, action='store_true', help="Generate plots.")
     parser.add_argument('--min-accesses', required=False, default=100,
         type=int, help='Minimum number of accesses in a cluster/interval to plot.')
 
@@ -984,8 +847,6 @@ def main():
     #print(data)
     #print(data["Vaddr"].to_numpy())
 
-    plotdatas = {}
-
     # K-Means based clustering
     if args.detect_clusters:
         print("Detecting address clusters...")
@@ -1030,28 +891,6 @@ def main():
             if vaddr > clusters[cvaddr]["high"]:
                 clusters[cvaddr]["high"] = vaddr
 
-        if args.cluster_id is None:
-            for vaddr, cluster in clusters.items():
-                low_vaddr = clusters[vaddr]["low"]
-                high_vaddr = clusters[vaddr]["high"]
-                plotdata = data.copy()
-                plotdata = plotdata[plotdata["Vaddr"] >= low_vaddr]
-                plotdata = plotdata[plotdata["Vaddr"] <= high_vaddr]
-                plotdatas.append(plotdata)
-                print("Virtual range: {} - {}, nr. of addresses: {}".format(
-                    '0x%x' % low_vaddr,
-                    '0x%x' % high_vaddr,
-                    len(plotdata)))
-
-        else:
-            if args.cluster_id > nr_centers - 1:
-                print("error: invalid cluster ID: {}".format(args.cluster_id))
-                sys.exit(-1)
-
-            if args.cluster_width is None:
-                print("error: you must also specify --cluster-width when selecting cluster ID")
-                sys.exit(-1)
-
             vaddr = int(cluster_centers_[args.cluster_id][0])
             low_vaddr = vaddr - (args.cluster_width * 4096)
             high_vaddr = vaddr + (args.cluster_width * 4096)
@@ -1067,27 +906,6 @@ def main():
         detect_intervals(data)
 
         sys.exit(0)
-
-
-
-    #print(plotdatas)
-    if args.plot:
-        outfile = args.input[0]
-
-        if (args.low_vaddr is not None and
-            args.high_vaddr is not None):
-            outfile = "{}-{}-{}".format(outfile, '0x%x' % args.low_vaddr, '0x%x' % args.high_vaddr)
-
-        if (args.start_timestamp is not None and
-            args.end_timestamp is not None):
-            outfile = "{}-{}-{}".format(outfile, args.start_timestamp, args.end_timestamp)
-
-        if args.phase is not None:
-            outfile = "{}-phase-{}".format(outfile, args.phase)
-
-        outfile = "{}.pdf".format(outfile)
-
-        plot_to_file(data, outfile)
 
 
     if args.csv and len(args.input) == 1:
