@@ -323,7 +323,7 @@ class TraceSet:
         )
 
     def __iter__(self):
-        return PhaseIterator(self)
+        return WindowIterator(self)
 
     def _get_trace_timestamp_bounds_(trace):
         """
@@ -398,7 +398,7 @@ class Phase(TraceSet):
             self.trace_measured.print_info()
 
 
-class PhaseIterator:
+class WindowIterator:
     """
     TraceSet iterator iterating through Phases of the traces and through windows
     inside phases of the trace. On each iteration, the next window is returned.
@@ -406,50 +406,29 @@ class PhaseIterator:
 
     def __init__(self, trace_set):
         phases = np.unique(trace_set.trace_ddr.phases() + trace_set.trace_hbm.phases())
-
-        self._window_iterator_ = None
-        self._traces_ = trace_set
         self._phases_ = iter(phases)
+        self._traces_ = trace_set
+        self._win_ = 0
+        self._phase_ = None
         self._set_next_phase_()
 
     def _set_next_phase_(self):
         """
         Move iterator to next phase.
         """
-        phase = self._traces_._get_phase_(next(self._phases_))
-        self._window_iterator_ = WindowIterator(phase)
+        self._phase_ = self._traces_._get_phase_(next(self._phases_))
 
     def __next__(self):
         """
         Get next window of the traces.
         """
         try:
-            return next(self._window_iterator_)
-        except StopIteration:
-            self._set_next_phase_()
-            return next(self)
-
-
-class WindowIterator:
-    """
-    TraceSet iterator iterating through windows of the traces.
-    On each iteration, the next window is returned.
-    """
-
-    def __init__(self, trace_set):
-        self._traces_ = trace_set
-        self._win_ = 0
-
-    def __next__(self):
-        """
-        Get next window of the traces.
-        """
-        try:
-            window = self._traces_._get_window_(self._win_)
+            window = self._phase_._get_window_(self._win_)
             self._win_ += 1
             return window
         except ValueError:
-            raise StopIteration
+            self._set_next_phase_()
+            return next(self)
 
 
 class Estimator:
