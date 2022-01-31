@@ -535,14 +535,13 @@ class Estimator:
         return (t_ddr - t_hbm) / 2.0
 
 
-trace_dir = "/home/ndenoyelle/Documents/Heterogeneous-Memory-Management/traces"
-ddr_input = "{}/DRAM-lulesh2.0-PEBS-countdown-32-PEBS-buffer-4096-pid-198687-tid-198687.dat.feather".format(
-    trace_dir
-)
-hbm_input = "{}/MCDRAM-lulesh2.0-PEBS-countdown-32-PEBS-buffer-4096-pid-196844-tid-196844.dat.feather".format(
-    trace_dir
-)
-
+# trace_dir = "/home/ndenoyelle/Documents/Heterogeneous-Memory-Management/traces"
+# ddr_input = "{}/DRAM-lulesh2.0-PEBS-countdown-32-PEBS-buffer-4096-pid-198687-tid-198687.dat.feather".format(
+#     trace_dir
+# )
+# hbm_input = "{}/MCDRAM-lulesh2.0-PEBS-countdown-32-PEBS-buffer-4096-pid-196844-tid-196844.dat.feather".format(
+#     trace_dir
+# )
 # measured_trace = None
 # ddr_trace = Trace(ddr_input, 1400000, verbose=True)
 # hbm_trace = Trace(hbm_input, 1400000, verbose=True)
