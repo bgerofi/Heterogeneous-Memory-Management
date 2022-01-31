@@ -4,32 +4,18 @@ import pandas as pd
 import numpy as np
 import argparse
 from intervaltree import Interval, IntervalTree
-import importlib
-
-class Memory:
-    # The size of page: 8192 (Bits).
-    PAGE_SIZE=1<<13
-    # Mask to get the page low_vaddr.
-    PAGE_MASK=~(PAGE_SIZE-1)
-    hex_range=np.vectorize(hex)
-
-    def page_addr(addr):
-        return addr & Memory.PAGE_MASK
-
-    def print_intervals(intervals, prefix=""):
-        print('\n'.join([ '{}{}:{}'.format(prefix, '0x%x'%i.begin, '0x%x'%i.end) for i in sorted(intervals) ]))
 
 class Trace:
     '''
     Class representing a single trace file.
     The file contains one or several phases and can subseted to one of these.
     It also be split into windows and subseted to one of these. The window
-    properties are defined by the user when subsetting, and the metric used for
-    for subsetting is also to be chosen.
+    properties are defined by the user, and the metric used for for subsetting 
+    is also to be chosen.
     '''
     def __init__(self, filename, cpu_cycles_per_ms,
                  compare_window, compare_method,
-                 verbose=True):
+                 verbose=False):
         if verbose:
             print("Loading from {}...".format(filename))
 
@@ -39,31 +25,64 @@ class Trace:
         # Public
         self.filename = filename
 
+        if verbose:
+            self.print_info()
+
     def is_empty(self):
+        '''
+        Return whether there is no sample in the trace.
+        '''
         return len(self_data_) == 0
         
     def singlify_phases(self):
+        '''
+        Set the trace such that there is only one phase in it.
+        '''
         self._data_.assign(Phase=0)
 
     def phases(self):
+        '''
+        Get a list of phases in the trace.
+        '''
         return np.unique(self._data_["Phase"])
 
+    def virtual_addresses(self):
+        '''
+        Get the virtual address of each sample in the trace.
+        '''
+        return self._data_["Vaddr"].values:
+
     def print_info(self):
-        print("Loaded {} accesses ({} phases) between {} and {} msecs".format(
-            len(self._data_), len(self.phases()),
-            self._data_["Timestamp"].iloc[0], self._data_["Timestamp"].iloc[-1]))
+        print("Loaded {} accesses ({} phases) between {} and {} "
+              "msecs".format(len(self._data_), len(self.phases()),
+                             self._data_["Timestamp"].iloc[0],
+                             self._data_["Timestamp"].iloc[-1]))
         
-    def _subset_(self, cond):
+    def _subset_(self, select):
+        '''
+        Build a new trace with a subset of this trace.
+        Element in the pandas data frame of this trace are selected passsing
+        `select` argument to the `__get_item__()` method of the pandas data
+        frame.
+        '''
         t = Trace.__new__(Trace)
         t.filename = self.filename
-        t.data = self._data_[cond]
+        t.data = self._data_[select]
         return t
 
     def get_phases(self, phase):
+        '''
+        Build a trace from this trace containing only the selected phases.
+        If `phase` is an int, then only one phase is selected.
+        If `phase` is a list of int, then all the phases it contains are 
+        selected.
+        An error will be raised if a phase is not present in the trace.
+        '''
         if isinstance(phase, int):
             phase = [phase]
         if not isinstance(phase, list):
-            raise TypeError("Provided phase must be either a number or a list of numbers.")
+            raise TypeError("Provided phase must be either a number or a list "
+                            "of numbers.")
 
         available_phases = self.phases()
         if any((p not in available_phases for p in phases)):
@@ -72,17 +91,35 @@ class Trace:
         return self._subset_(self._data_.Phase in phase)
 
     def subset_window_timestamp(self, compare_window, win, nr_wins):
-        return self._subset_((self._data_["Timestamp"] >= (compare_window * win)) & \
-                           (self._data_["Timestamp"] < (compare_window * (win + 1))))
+        '''
+        Build a trace from this trace with a subset of this trace element
+        forming a window based on the "Timestamp" column of the pandas data 
+        frame" 
+        '''
+        return \
+            self._subset_((self._data_["Timestamp"] >= (compare_window * win)) & \
+                          (self._data_["Timestamp"] < (compare_window * (win + 1))))
 
     def subset_window_instruction(self, compare_window, win, nr_wins):
+        '''
+        Build a trace from this trace with a subset of this trace element
+        forming a window based on the "Instrs" column of the pandas data 
+        frame" 
+        '''
         if win == nr_wins - 1:
-            return self._subset_(self._data_["Instrs"] >= (compare_window * win))
+            return \
+                self._subset_(self._data_["Instrs"] >= (compare_window * win))
         else:
-            return self._subset_((self._data_["Instrs"] >= (compare_window * win)) & \
-                               (self._data_["Instrs"] < (compare_window * (win + 1))))
+            return \
+                self._subset_((self._data_["Instrs"] >= (compare_window * win)) & \
+                              (self._data_["Instrs"] < (compare_window * (win + 1))))
 
     def subset_window_access(self, compare_window, win, nr_wins):
+        '''
+        Build a trace from this trace with a subset of this trace element
+        forming a window based on the number of samples in the pandas data 
+        frame"
+        '''
         if win == nr_wins - 1:
             return self._subset_((compare_window * win):)
         else:
@@ -95,7 +132,8 @@ class Trace:
               .format(self._data_.filename, len(self._data_), phase,
                       self._data_["Timestamp"].iloc[0],
                       self._data_["Timestamp"].iloc[-1],
-                      self._data_["Timestamp"].iloc[-1] - self._data_["Timestamp"].iloc[0],
+                      self._data_["Timestamp"].iloc[-1] - \
+                      self._data_["Timestamp"].iloc[0],
                       self._data_["Instrs"].iloc[-1],
                       len(self._data_) * 8 / trace["Instrs"].iloc[-1]))
 
@@ -106,116 +144,187 @@ class Trace:
         return self._data_.__get_item__(item)
 
 class TraceSet:
+    '''
+    Make a bundle of three traces where the first trace is the trace 
+    containing the execution of a single application in DDR memory, the 
+    second trace is the trace containing the execution of the same application
+    in High Bandwidth Memory (hbm), and the last trace contains an execution of
+    the same application with an arbitrary memory allocation. 
+    (The last trace may be `None`.)
+    
+    This trace set, iterated with a window iterator, i.e an iterator 
+    returning a contiguouus subset of elements of the three traces representing
+    the execution of the same region of an application in three different 
+    memory set up.
+
+    The window properties can be set with two knobs: 
+    window_length and the comparison unit which can be time wise (ms),
+    instructions wise (instrs) or memory access wise (accesses).
+    '''
     def __init__(self, trace_ddr, trace_hbm, trace_measured,
-                compare_window, compare_method):
+                 window_length, compare_unit, verbose=False):
         self.trace_ddr = trace_ddr
         self.trace_hbm = trace_hbm
         self.trace_measured = trace_measured
 
         self.nr_win = None
-        self.compare_window = None        
-        self.compare_window2 = None
-        self.compare_window3 = None
-        self.set_window_properties(compare_window, compare_method)
+        self.window_length = None        
+        self.window_length2 = None
+        self.window_length3 = None
+        self.set_window_properties(window_length, compare_unit)
+
+        self._verbose_ = verbose
         
-    def set_window_properties(self, compare_window, compare_method):
-        if compare_method == "accesses":
+    def set_window_properties(self, window_length, compare_unit):
+        '''
+        Change the way an existing TraceSet is split into windows.
+        This can be used if for some phases it is more meaningful to
+        change the comparison unit or length of the windows.
+        The window properties can be set with two knobs:
+        window_length and the comparison unit which can be time wise (ms),
+        instructions wise (instrs) or memory access wise (accesses).
+        '''
+        if compare_unit == "accesses":
             self._get_trace_bounds_fn_ = TraceSet._get_trace_access_bounds_
             self._subset_window_fn_ = Trace.subset_window_access
-        if compare_method == "instrs":
+        if compare_unit == "instrs":
             self._get_trace_bounds_fn_ = TraceSet._get_trace_instruction_bounds_
             self._subset_window_fn_ = Trace.subset_window__instruction
-        if compare_method == "ms":
+        if compare_unit == "ms":
             self._get_trace_bounds_fn_ = TraceSet._get_trace_timestamp_bounds_
             self._subset_window_fn_ = Trace.subset_window_timestamp
         else:
             err_msg = "Invalid window comparison unit: {}.\n".format(method)
             err_msg += "Expected one of ['accesses', 'instrs', 'ms']"
             raise ValueError(err_msg)
-        self.compare_window = compare_window
-        self.compare_method = compare_method
+        self.window_length = window_length
+        self.compare_unit = compare_unit
         self._set_window_()
 
     def singlify_phases(self):
+        '''
+        Set all traces in this TraceSet such that there is only the same single 
+        phase in them.
+        '''
         self.trace_ddr.singlify_phases()
         self.trace_hbm.singlify_phases()
         if self.trace_measured is not None:
             self.trace_measured.singlify_phases()
 
     def is_empty(self):
+        '''
+        Return whether there is no sample in this TraceSet.
+        '''        
         return len(self.trace_ddr) == 0 || len(self.trace_hbm) == 0
 
-    def time_start(self):
-        return self.trace_ddr["Timestamp"].iloc[0]
-
-    def time_end(self):
-        return self.trace_ddr["Timestamp"].iloc[-1]
-    
     def timespan_ddr(self):
-        return self.time_end() - self.time_start()
+        '''
+        Get the total time in the ddr trace.
+        '''
+        return self.trace_ddr["Timestamp"].iloc[-1] - \
+            self.trace_ddr["Timestamp"].iloc[0]
 
     def timespan_hbm(self):
-        return self.trace_hbm["Timestamp"].iloc[-1] - self.trace_hbm["Timestamp"].iloc[0]
+        '''
+        Get the total time in the hbm trace.
+        '''
+        return self.trace_hbm["Timestamp"].iloc[-1] - \
+            self.trace_hbm["Timestamp"].iloc[0]
     
-    def time_measured(self):
+    def timespan_measured(self):
+        '''
+        Get the total time in the measured trace.
+        If there is no measured trace, 0 is returned.
+        '''
         if self.trace_measured is None:
             return 0
-        else:
-            return self.trace_measured["Timestamp"].iloc[-1] - self.trace_measured["Timestamp"].iloc[0]
+        return self.trace_measured["Timestamp"].iloc[-1] - \
+            self.trace_measured["Timestamp"].iloc[0]
     
     def subset_phases(phases):
+        '''
+        Filter this TraceSet to contain only selected phases.
+        '''
         self.trace_ddr.subset_phases(phases)
         self.trace_hbm.subset_phases(phases)
-        if self.trace_measured is not None:
+        if self.trace_measured is not None: 
             self.trace_measured.subset_phases(phases)
             
-    def get_phase(self, phase):
+    def _get_phase_(self, phase):
+        '''
+        Build a new TraceSet from this TraceSet containing a single phase of it.
+        '''
         return Phase(phase, self)
 
-    def get_window(self, win):
+    def _get_window_(self, win):
+        '''
+        Build a new TraceSet from this TraceSet containing a single window of 
+        it. This is usually called when this TraceSet is made of a single phase.
+        '''
         if win >= self.nr_win:
-            raise ValueError("Window {} out of bounds ({}).".format(win, self.nr_win))
-        trace_ddr = self._subset_window_fn_(self.trace_ddr, self.compare_window,
-                                         win, self.nr_win)
-        trace_hbm = self._subset_window_fn_(self.trace_hbm, self.compare_window2,
-                                         win, self.nr_win)
-        trace_measured = None
+            raise ValueError("Window {} out of bounds "
+                             "({}).".format(win, self.nr_win))
+        trace_ddr = self._subset_window_fn_(self.trace_ddr, self.window_length,
+                                            win, self.nr_win)
+        trace_hbm = self._subset_window_fn_(self.trace_hbm,
+                                            self.window_length2,
+                                            win, self.nr_win)
         if self.trace_measured is not None:
-            trace_measured = self._subset_window_fn_(self.trace_measured, self.compare_window3,
-                                             win, self.nr_win)
+            trace_measured = self._subset_window_fn_(self.trace_measured,
+                                                     self.window_length3, win,
+                                                     self.nr_win)
+        else:
+            trace_measured = None
         return TraceSet(trace_ddr, trace_hbm, trace_measured,
-                        self.compare_window, self.compare_method)
+                        self.window_length, self.compare_unit,
+                        self._verbose_)
 
     def print_windows_info(self):
-        print("{} windows with compare_window: {} {}, compare_window2: {} {}"\
-              .format(self.nr_wins, self.compare_window, self.compare_method,
-                      self.compare_window2, self.compare_method))
+        print("{} windows with window_length: {} {}, window_length2: {} {}"\
+              .format(self.nr_wins, self.window_length, self.compare_unit,
+                      self.window_length2, self.compare_unit))
 
-    def iter_windows(self):
-        return WindowIterator(self)
-
-    def iter_phases(self):
-        return PhaseIterator(self)
+    def __iter__(self):
+        return PhaseIterator(self, self._verbose_)
 
     def _get_trace_timestamp_bounds_(trace):
+        '''
+        Get bounds of the trace (minimum timestamp, maximum timestamp) 
+        in the "ms" unit.
+        '''
         return trace["Timestamp"].iloc[0], trace["Timestamp"].iloc[-1]
 
     def _get_trace_instruction_bounds_(trace):
+        '''
+        Get bounds of the trace (minimum instruction number, 
+        maximum instruction number) in the "instruction" unit.
+        '''
         return trace["Instrs"].iloc[0], trace["Instrs"].iloc[-1]
 
     def _get_trace_access_bounds_(trace):
+        '''
+        Get bounds of the trace (minimum memory access number, 
+        maximum memory access number) in the "access" unit.
+        '''
         return 0, len(trace)
 
     def _set_window_(self):
+        '''
+        Set number of windows, and window length for each trace according
+        to the selected unit.
+        '''        
         t1_s, t1_e = self._get_trace_bounds_fn_(self.trace_ddr)
-        t2_s, t2_e = self._get_trace_bounds_fn_(self.trace_hbm)        
-        self.nr_wins = int((t1_e - t1_s) / self.compare_window)
-        self.compare_window2 = int((t2_e - t2_s) / self.nr_wins)
+        t2_s, t2_e = self._get_trace_bounds_fn_(self.trace_hbm)
+        self.nr_wins = int((t1_e - t1_s) / self.window_length)
+        self.window_length2 = int((t2_e - t2_s) / self.nr_wins)
         if self.trace_measured is not None:
             t3_s, t3_e = self._get_trace_bounds_fn_(self.trace_measured)
-            self.compare_window3 = int((t3_e - t3_s) / self.nr_wins)
+            self.window_length3 = int((t3_e - t3_s) / self.nr_wins)
 
 class Phase(TraceSet):
+    '''
+    A Phase is a subset of a TraceSet containing a single phase.
+    '''        
     def __init__(self, phase, trace_set):
         if not isinstance(phase, int):
             raise ValueError("Phase argument must be an integer to subset the "
@@ -223,106 +332,127 @@ class Phase(TraceSet):
         
         trace_ddr = trace_set.trace_ddr.get_phases(phase)
         trace_hbm = trace_set.trace_hbm.get_phases(phase)
-        trace_measured = None
-        if trace_set.trace_measured is not None:
+        if self.trace_measured is not None:
             trace_measured = trace_set.trace_measured.get_phases(phase)
-        if trace_measured is not None and trace_measured.is_empty():
+        else:
             trace_measured = None
-        compare_method = trace_set.compare_method
-        compare_window = trace_set.compare_method
+        compare_unit = trace_set.compare_unit
+        window_length = trace_set.compare_unit
+
         super(Phase, self).__init__(trace_ddr, trace_hbm, trace_measured,
-                                    compare_window, compare_method)
-        if trace_ddr.is_empty():
-            print("{}: WARNING: no data available in phase {}".format(trace_ddr.filename, phase))
+                                    window_length, compare_unit)
         self.phase = phase
+
+        if trace_set._verbose_:
+            self.print_info()
+            if trace_ddr.is_empty():
+                print("{}: WARNING: no data available in "
+                      "phase {}".format(trace_ddr.filename, phase))
 
     def print_info(self):
         self.print_windows_info()
         self.trace_ddr.print_info(self.phase)
         self.trace_hbm.print_info(self.phase)
-        if trace_measured is not None:
-            self.trace_measured.print_info(self.phase)
+        
+        self.trace_measured.print_info(self.phase)
 
 class PhaseIterator:
-    def __init__(self. trace_set):
-        # Public
-        self.time_total = 0
-        self.time_measured = 0
-        self.window_iterator = None
-
+    '''
+    TraceSet iterator iterating through Phases of the traces and through windows
+    inside phases of the trace. On each iteration, the next window is returned.
+    '''
+    def __init__(self, trace_set):
         # Private
-        self._prev_phase_last_ts_ = -1
+        self._window_iterator_ = None
         self._traces_ = trace_set
         self._phases_ = iter(trace_set.phases())
         self._set_next_phase_()
 
     def _set_next_phase_(self):
-        phase = self._traces_.get_phase(next(self._phases_))
-        if phase.is_empty():
-            if self._prev_phase_last_ts_ > -1:
-                self.time_total += phase.time_start() - self._prev_phase_last_ts_
-                self._prev_phase_last_ts_ = -1
-            else:
-                self._prev_phase_last_ts_ = phase.time_start()
-        else:
-            self.time_total += phase.timespan_ddr()
-            self._prev_phase_last_ts_ = phase.time_end()
-        
-        self.time_measured += phase.time_measured()
-        self.window_iterator = WindowIterator(phase)
+        '''
+        Move iterator to next phase.
+        '''
+        phase = self._traces_._get_phase_(next(self._phases_), self._traces_._verbose_)
+        self._window_iterator_ = WindowIterator(phase)
 
     def __next__(self):
+        '''
+        Get next window of the traces.
+        '''
         try:
-            return next(self.window_iterator)
+            return next(self._window_iterator_)
         except StopIteration:
             self._set_next_phase_()
             return next(self)
         
 class WindowIterator:
+    '''
+    TraceSet iterator iterating through windows of the traces.
+    On each iteration, the next window is returned.
+    '''
     def __init__(self, trace_set):
         # Private
         self._traces_ = trace_set
         self._win_ = 0
-        self._prev_win_last_ts_ = -1
     
     def __next__(self):
+        '''
+        Get next window of the traces.
+        '''
         try:
-            window = self._traces_.get_window(self._win_)
+            window = self._traces_._get_window_(self._win_)
+            self._win_ += 1
+            return window
         except ValueError:
             raise StopIteration
-        self._win_ += 1
-        return window
 
 class Estimator:
-    def __init__(self, hbm_intervals, hbm_factor=1.0):
+    '''
+    Estimation of execution time for a set of traces and a given set of address
+    intervals mapped into the High Bandwidth Memory (hbm).
+    '''
+    def __init__(self, hbm_intervals):
         self.hbm_intervals = hbm_intervals
-        self.hbm_factor = hbm_factor
 
-    def compute_slow_estimate(self, window):
-        t_ddr = window.timespan_ddr()
-        t_hbm = window.timespan_hbm()
-        nr_accesses = 0
-        nr_hbm_accesses = 0
-        for vaddr in window.trace_ddr["Vaddr"].values:
-            if self.hbm_intervals.overlaps(vaddr):
-                nr_hbm_accesses += 1
-            else:
-                nr_accesses += 1
-        nr_accesses += nr_hbm_accesses * self.hbm_factor
-        return t_ddr - (float(t_ddr - t_hbm) * (float(nr_hbm_accesses) / nr_accesses))
-
-    def compute_slow_estimate(self):
-        t_ddr = window.timespan_ddr()
-        t_hbm = window.timespan_hbm()
-        return (t_ddr - t_hbm) / 2.0
-
-    def estimate(self, window):
+    def estimate(self, trace_set, hbm_factor=1.0):
+        # Iterate phases and windows to estimate save time versus actual spent
+        # time.
+        estimated_time = 0
+        measured_time = 0    
+        for window in trace_set:
+            estimated_time += self._estimate_window_(window, hbm_factor)
+            measured_time += window.timespan_measured()
+        return estimated_time, measured_time
+        
+    def _estimate_window_(self, window, hbm_factor):
         t_ddr = window.timespan_ddr()
         t_hbm = window.timespan_hbm()
         if t_ddr > (t__hbm * 1.03):
-            return self.compute_slow_estimate(window)
+            return self._compute_slow_estimate_(window, hbm_factor)
         else:
-            return self.compute_fast_estimate(window)
+            return self._compute_fast_estimate_(window)
+
+    def _compute_slow_estimate_(self, window, hbm_factor):
+        t_ddr = window.timespan_ddr()
+        t_hbm = window.timespan_hbm()
+        ddr_accesses = 0
+        hbm_accesses = 0
+        for vaddr in window.virtual_addresses():
+            if self.hbm_intervals.overlaps(vaddr):
+                hbm_accesses += 1
+            else:
+                ddr_accesses += 1
+        total_weighted_accesses = \
+            float(ddr_accesses + hbm_accesses * hbm_factor)
+        weighted_ratio_of_hbm_access = \
+            float(hbm_accesses) / total_weighted_accesses
+        max_saved_time = float(t_ddr - t_hbm)
+        return t_ddr - (max_saved_time * weighted_ratio_of_hbm_access)
+
+    def _compute_fast_estimate_(self):
+        t_ddr = window.timespan_ddr()
+        t_hbm = window.timespan_hbm()
+        return (t_ddr - t_hbm) / 2.0
         
 if __name__ == "__main__":
     class Parser:
@@ -359,68 +489,65 @@ if __name__ == "__main__":
         def parse_phases(phases):
             return [ int(i) for i in phases ]
 
+    def print_intervals(intervals, prefix=""):
+        intervals=('{}{}:{}'.format(prefix, '0x%x'%i.begin, '0x%x'%i.end)\
+                   for i in sorted(intervals))
+        print('\n'.join(intervals))    
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("-i", "--input", type=str, required=True,
-        action='append',
-        help=("Feather format pandas memory access trace input file(s)."))
+    parser.add_argument("--ddr-input", required=True, type=str,
+        help=("Feather format pandas memory access trace input file of "
+              "execution in ddr memory."))
+    parser.add_argument("--hbm-input", required=True, type=str,
+        help=("Feather format pandas memory access trace input file of "
+              "execution in hbm memory."))
+    parser.add_argument("--measured-input", type=str
+        help=("Feather format pandas memory access trace input file of "
+              "execution to be compared with estimator."))
     parser.add_argument('--cpu-cycles-per-ms', default=1400000, type=int,
         help='CPU cycles per millisecond (default: 1,400,000 for KNL).')
-    parser.add_argument('--phase', action='append', type=int,
-        help='Specify application phase.')
     parser.add_argument('--compare-window-len', default=50, type=int,
         help='Comparison window length.')
     parser.add_argument('--compare-window-unit', default="ms", type=str
         help='Comparison window length unit (accesses, ms or instrs).')
     parser.add_argument('--hbm-factor', default=1.0, type=float,
         help='HBM weight factor.')
-    parser.add_argument("--hbm", action='append', type=str,
-        help=("Memory ranges that are placed in high-bandwidth memory (e.g., 0x2aaaf9144000-0x2aaafabd0000)"))
+    parser.add_argument("--hbm-ranges", action='append', type=str,
+        help=("Memory ranges that are placed in high-bandwidth memory "
+              "(e.g., 0x2aaaf9144000-0x2aaafabd0000)"))
+    parser.add_argument('-p','--phases', action='append', type=int,
+        help="Subset traces to only contain theses phases.")
     parser.add_argument('--verbose', default=False, action='store_true')
     args = parser.parse_args()
+        
+    # Load traces and bundle them together.
+    ddr_trace = Trace(args.ddr_input, args.cpu_cycles_per_ms, args.verbose)
+    hbm_trace= Trace(args.hbm_input, args.cpu_cycles_per_ms, args.verbose)
+    if args.measured_input is not None:
+        measured_trace = Trace(args.measured_input, args.cpu_cycles_per_ms,
+                               args.verbose)
+    else:
+        measured_trace = None
+    traces = TraceSet(ddr_trace, hbm_trace, measured_trace,
+                      args.compare_window_len, args.compare_window_unit,
+                      args.verbose)
+    # Filter phases if needed.
+    if args.phases is not None:
+        phases = [ int(i) for i in args.phases ]
+        traces.subset_phases(phases)
 
     # Compute hbm intervals.
     hbm_intervals = IntervalTree()
-    if args.hbm is not None:
-        hbm_intervals.update(Parse.parse_intervals(args.hbm))
-    if data3 is not None:
-        hbm_intervals.update(Parse.parse_name_intervals(data3.filename))
-    if not args.verbose:
+    if args.measured_input is not None:
+        hbm_intervals.update(Parse.parse_name_intervals(args.measured_input))
+    if args.hbm_ranges is not None:
+        for hbm_range in args.hbm_ranges:
+            hbm_intervals.update(Parse.parse_intervals(args.hbm))
+    if args.verbose:
         Memory.print_intervals(hbm_intervals, 'HBM range: ')
-        
-    # Load traces
-    data = Trace(args.input[0], args.cpu_cycles_per_ms)
-    if not args.csv:
-        data.print_info()
-    data2 = Trace(args.input[1], args.cpu_cycles_per_ms) if len(args.input) > 1 else None
-    if data2 is not None and not args.csv:
-        data2.print_info()
-    data3 = Trace(args.input[2], args.cpu_cycles_per_ms) if len(args.input) > 2 else None
-    if data3 is not None and not args.csv:
-        data3.print_info()
 
-    # Bundle traces together.
-    traces = TraceSet(data, data2, data3,
-                      args.compare_window_len, args.compare_window_unit)
-    if args.phase is not None:
-        if len(args.phase) == 1 and args.phase[0] == -1:
-            traces.singlify_phases()
-        else:
-            traces.subset_phases(Parser.parse_phases(args.phase))
-        if traces.is_empty():
-            raise ValueError("No data available in selected phases")
-
-    
-    
-    for window in traces.iter_phases(args.detect_intervals):
-        pages = {}
-        pages2 = {}
-        inter = {}
-        interval_pairs = IntervalTree()
-        PAGE_SIZE = 4096
-        PAGE_SHIFT = 12
-        nr_hbm_accesses = 0
-        nr_accesses = 0
-
-        def is_hbm(nr_hbm_accesses, vaddr):
-            if hbm_intervals.overlaps(vaddr):
-                nr_hbm_accesses += 1
+    # Compute estimation for the traces and hbm_intervals.
+    estimated_time, measured_time = \
+        Estimator(hbm_intervals).estimate(traces, args.hbm_factor)
+    print("Time measure: {}".format(measured_time)
+    print("Time estimated: {}".format(estimated_time)
