@@ -542,10 +542,11 @@ ddr_input = "{}/DRAM-lulesh2.0-PEBS-countdown-32-PEBS-buffer-4096-pid-198687-tid
 hbm_input = "{}/MCDRAM-lulesh2.0-PEBS-countdown-32-PEBS-buffer-4096-pid-196844-tid-196844.dat.feather".format(
     trace_dir
 )
-measured_trace = None
-ddr_trace = Trace(ddr_input, 1400000, verbose=True)
-hbm_trace = Trace(hbm_input, 1400000, verbose=True)
-traces = TraceSet(ddr_trace, hbm_trace, measured_trace, verbose=True)
+
+# measured_trace = None
+# ddr_trace = Trace(ddr_input, 1400000, verbose=True)
+# hbm_trace = Trace(hbm_input, 1400000, verbose=True)
+# traces = TraceSet(ddr_trace, hbm_trace, measured_trace, verbose=True)
 
 if __name__ == "__main__":
 
