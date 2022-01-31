@@ -329,7 +329,7 @@ class TraceSet:
         )
 
     def __iter__(self):
-        return PhaseIterator(self, self._verbose_)
+        return PhaseIterator(self)
 
     def _get_trace_timestamp_bounds_(trace):
         """
@@ -372,9 +372,12 @@ class Phase(TraceSet):
     """
 
     def __init__(self, phase, trace_set):
-        if not isinstance(phase, int):
+        if (not isinstance(phase, int)) or (not isinstance(phase, np.int64)):
             raise ValueError(
-                "Phase argument must be an integer to subset the " "phase of a TraceSet"
+                "Invalid phase argument {} of type {}.\n"
+                "Phase must be an integer to subset the phase of a TraceSet".format(
+                    phase, str(type(phase))
+                )
             )
 
         trace_ddr = trace_set.trace_ddr.get_phases(phase)
@@ -414,17 +417,24 @@ class PhaseIterator:
     """
 
     def __init__(self, trace_set):
+        phases = list(trace_set.trace_ddr.virtual_addresses()) + list(
+            trace_set.trace_hbm.virtual_addresses()
+        )
+        if trace_set.trace_measured is not None:
+            phases += list(trace_set.trace_measured.virtual_addresses())
+        phases = np.unique(phases)
+
         # Private
         self._window_iterator_ = None
         self._traces_ = trace_set
-        self._phases_ = iter(trace_set.phases())
+        self._phases_ = iter(phases)
         self._set_next_phase_()
 
     def _set_next_phase_(self):
         """
         Move iterator to next phase.
         """
-        phase = self._traces_._get_phase_(next(self._phases_), self._traces_._verbose_)
+        phase = self._traces_._get_phase_(next(self._phases_))
         self._window_iterator_ = WindowIterator(phase)
 
     def __next__(self):
@@ -535,17 +545,22 @@ class Estimator:
         return (t_ddr - t_hbm) / 2.0
 
 
-# trace_dir = "/home/ndenoyelle/Documents/Heterogeneous-Memory-Management/traces"
-# ddr_input = "{}/DRAM-lulesh2.0-PEBS-countdown-32-PEBS-buffer-4096-pid-198687-tid-198687.dat.feather".format(
-#     trace_dir
-# )
-# hbm_input = "{}/MCDRAM-lulesh2.0-PEBS-countdown-32-PEBS-buffer-4096-pid-196844-tid-196844.dat.feather".format(
-#     trace_dir
-# )
-# measured_trace = None
-# ddr_trace = Trace(ddr_input, 1400000, verbose=True)
-# hbm_trace = Trace(hbm_input, 1400000, verbose=True)
-# traces = TraceSet(ddr_trace, hbm_trace, measured_trace, verbose=True)
+trace_dir = "/home/ndenoyelle/Documents/Heterogeneous-Memory-Management/traces"
+ddr_input = "{}/DRAM-lulesh2.0-PEBS-countdown-32-PEBS-buffer-4096-pid-198687-tid-198687.dat.feather".format(
+    trace_dir
+)
+hbm_input = "{}/MCDRAM-lulesh2.0-PEBS-countdown-32-PEBS-buffer-4096-pid-196844-tid-196844.dat.feather".format(
+    trace_dir
+)
+measured_trace = None
+ddr_trace = Trace(ddr_input, 1400000, verbose=True)
+hbm_trace = Trace(hbm_input, 1400000, verbose=True)
+traces = TraceSet(ddr_trace, hbm_trace, measured_trace, verbose=True)
+addresses = ddr_trace.virtual_addresses()
+np.random.shuffle(addresses)
+hbm_addresses = addresses[: int(len(addresses) / 2)]
+hbm_intervals = IntervalTree([Interval(i, i + (1 << 13)) for i in hbm_addresses])
+estimated_time, measured_time = Estimator.estimate(traces, hbm_intervals)
 
 if __name__ == "__main__":
 
