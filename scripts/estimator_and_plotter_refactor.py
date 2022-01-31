@@ -15,15 +15,17 @@ class Trace:
     is also to be chosen.
     """
 
-    def __init__(
-        self, filename, cpu_cycles_per_ms, compare_window, compare_method, verbose=False
-    ):
+    def __init__(self, filename, cpu_cycles_per_ms, verbose=False):
         if verbose:
             print("Loading from {}...".format(filename))
 
         # Private
-        self._data_ = pd.read_feather(filename)
-        self._data_["Timestamp"] = data["Timestamp"].div(cpu_cycles_per_ms)
+        data = pd.read_feather(filename)
+        data["Timestamp"] = data["Timestamp"].div(cpu_cycles_per_ms)
+        if "Phase" not in data.columns:
+            data = data.assign(Phase=0)
+
+        self._data_ = data
         # Public
         self.filename = filename
 
@@ -40,7 +42,7 @@ class Trace:
         """
         Set the trace such that there is only one phase in it.
         """
-        self._data_.assign(Phase=0)
+        self._data_ = self._data_.assign(Phase=0)
 
     def phases(self):
         """
@@ -69,7 +71,7 @@ class Trace:
         """
         Build a new trace with a subset of this trace.
         Element in the pandas data frame of this trace are selected passsing
-        `select` argument to the `__get_item__()` method of the pandas data
+        `select` argument to the `__getitem__()` method of the pandas data
         frame.
         """
         t = Trace.__new__(Trace)
@@ -101,43 +103,41 @@ class Trace:
             )
         return self._subset_(self._data_.Phase in phase)
 
-    def subset_window_timestamp(self, compare_window, win, nr_wins):
+    def subset_window_timestamp(self, window_len, win, nr_wins):
         """
         Build a trace from this trace with a subset of this trace element
         forming a window based on the "Timestamp" column of the pandas data
         frame"
         """
         return self._subset_(
-            (self._data_["Timestamp"] >= (compare_window * win))
-            & (self._data_["Timestamp"] < (compare_window * (win + 1)))
+            (self._data_["Timestamp"] >= (window_len * win))
+            & (self._data_["Timestamp"] < (window_len * (win + 1)))
         )
 
-    def subset_window_instruction(self, compare_window, win, nr_wins):
+    def subset_window_instruction(self, window_len, win, nr_wins):
         """
         Build a trace from this trace with a subset of this trace element
         forming a window based on the "Instrs" column of the pandas data
         frame"
         """
         if win == nr_wins - 1:
-            return self._subset_(self._data_["Instrs"] >= (compare_window * win))
+            return self._subset_(self._data_["Instrs"] >= (window_len * win))
         else:
             return self._subset_(
-                (self._data_["Instrs"] >= (compare_window * win))
-                & (self._data_["Instrs"] < (compare_window * (win + 1)))
+                (self._data_["Instrs"] >= (window_len * win))
+                & (self._data_["Instrs"] < (window_len * (win + 1)))
             )
 
-    def subset_window_access(self, compare_window, win, nr_wins):
+    def subset_window_access(self, window_len, win, nr_wins):
         """
         Build a trace from this trace with a subset of this trace element
         forming a window based on the number of samples in the pandas data
         frame"
         """
         if win == nr_wins - 1:
-            return self._subset_(slice(compare_window * win))
+            return self._subset_(slice(window_len * win))
         else:
-            return self._subset_(
-                slice(compare_window * win), (compare_window * (win + 1))
-            )
+            return self._subset_(slice(compare_window * win), (window_len * (win + 1)))
 
     def print_phase_info(self, phase):
         print(
@@ -158,8 +158,8 @@ class Trace:
     def __len__(self):
         return self._data_.__len__()
 
-    def __get_item__(self, item):
-        return self._data_.__get_item__(item)
+    def __getitem__(self, item):
+        return self._data_.__getitem__(item)
 
 
 class TraceSet:
@@ -186,8 +186,8 @@ class TraceSet:
         trace_ddr,
         trace_hbm,
         trace_measured,
-        window_length,
-        compare_unit,
+        window_length=50,
+        compare_unit="ms",
         verbose=False,
     ):
         self.trace_ddr = trace_ddr
@@ -534,6 +534,18 @@ class Estimator:
         t_hbm = window.timespan_hbm()
         return (t_ddr - t_hbm) / 2.0
 
+
+trace_dir = "/home/ndenoyelle/Documents/Heterogeneous-Memory-Management/traces"
+ddr_input = "{}/DRAM-lulesh2.0-PEBS-countdown-32-PEBS-buffer-4096-pid-198687-tid-198687.dat.feather".format(
+    trace_dir
+)
+hbm_input = "{}/MCDRAM-lulesh2.0-PEBS-countdown-32-PEBS-buffer-4096-pid-196844-tid-196844.dat.feather".format(
+    trace_dir
+)
+measured_trace = None
+ddr_trace = Trace(ddr_input, 1400000, verbose=True)
+hbm_trace = Trace(hbm_input, 1400000, verbose=True)
+traces = TraceSet(ddr_trace, hbm_trace, measured_trace, verbose=True)
 
 if __name__ == "__main__":
 
