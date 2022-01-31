@@ -238,6 +238,12 @@ class TraceSet:
         """
         return len(self.trace_ddr) == 0 or len(self.trace_hbm) == 0
 
+    def time_start(self):
+        return self.trace_ddr["Timestamp"].iloc[0]
+
+    def time_end(self):
+        return self.trace_ddr["Timestamp"].iloc[-1]
+
     def timespan_ddr(self):
         """
         Get the total time in the ddr trace.
@@ -453,7 +459,23 @@ class Estimator:
         # time.
         estimated_time = 0
         measured_time = 0
+        previous_iter_empty = False
+        empty_iter_start = -1
+
         for window in trace_set:
+            if window.is_empty():
+                previous_iter_empty = True
+                continue
+
+            # Count cumulated time of empty windows.
+            if previous_iter_empty:
+                time_empty = window.time_start() - empty_iter_start
+                measured_time += time_empty
+                estimated_time += time_empty
+            empty_iter_start = window.time_end()
+            previous_iter_empty = False
+
+            # Run estimation on the window.
             estimated_time += Estimator._estimate_window_(
                 window, hbm_intervals, hbm_factor
             )
