@@ -235,7 +235,8 @@ class TraceSet:
             raise ValueError(err_msg)
         self.window_length = window_length
         self.compare_unit = compare_unit
-        self._set_window_()
+        if not self.is_empty():
+            self._set_window_()
 
     def singlify_phases(self):
         """
