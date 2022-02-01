@@ -345,6 +345,9 @@ class TraceSet:
     def __iter__(self):
         return WindowIterator(self)
 
+    def __len__(self):
+        return len(self.trace_ddr)
+
     def _get_trace_timestamp_bounds_(trace):
         """
         Get bounds of the trace (minimum timestamp, maximum timestamp)
@@ -628,21 +631,28 @@ class Estimator:
                 )
         return estimated_time + empty_time, measured_time + empty_time
 
+    def _estimate_fast_(self, t_ddr, t_hbm):
+        return (t_ddr + t_hbm) / 2.0
+
     def _estimate_accurate_(self, window, hbm_intervals, hbm_factor, t_ddr, t_hbm):
-        ddr_accesses = 0
-        hbm_accesses = 0
-        for addr in window.trace_ddr.virtual_addresses() & self._page_mask_:
-            if hbm_intervals.overlaps_point(addr):
-                hbm_accesses += 1
-            else:
-                ddr_accesses += 1
+        ddr_accesses, hbm_accesses = self._access_window_(window, hbm_intervals)
         max_saved_time = t_ddr - t_hbm
         total_weighted_accesses = float(ddr_accesses + hbm_accesses * hbm_factor)
         weighted_ratio_of_hbm_access = float(hbm_accesses) / total_weighted_accesses
         return t_ddr - (max_saved_time * weighted_ratio_of_hbm_access)
 
-    def _estimate_fast_(self, t_ddr, t_hbm):
-        return (t_ddr + t_hbm) / 2.0
+    def _access_window_(self, window, hbm_intervals):
+        ddr_accesses = 0
+        hbm_accesses = 0
+        addr, count = np.unique(
+            window.trace_ddr.virtual_addresses() & self._page_mask_, return_counts=True
+        )
+        for addr, n in zip(addr, count):
+            if hbm_intervals.overlaps_point(addr):
+                hbm_accesses += n
+            else:
+                ddr_accesses += n
+        return ddr_accesses, hbm_accesses
 
 
 if __name__ == "__main__":
