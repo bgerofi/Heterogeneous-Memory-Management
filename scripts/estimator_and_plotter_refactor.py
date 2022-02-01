@@ -351,9 +351,13 @@ class TraceSet:
         """
         t1_s, t1_e = self._get_trace_bounds_fn_(self.trace_ddr)
         t2_s, t2_e = self._get_trace_bounds_fn_(self.trace_hbm)
-        self.nr_win = int(float(t1_e - t1_s) / float(self.window_length))
-        # There is at least one window.
-        self.nr_win = 1 if self.nr_win == 0 else self.nr_win
+        if self.window_length is None:
+            self.nr_win = 1
+            self.window_length = t1_e - t1_s
+        else:
+            self.nr_win = int(float(t1_e - t1_s) / float(self.window_length))
+            # There is at least one window.
+            self.nr_win = 1 if self.nr_win == 0 else self.nr_win
         self.window_length2 = int(float(t2_e - t2_s) / float(self.nr_win))
 
 
@@ -602,7 +606,7 @@ if __name__ == "__main__":
         help="CPU cycles per millisecond (default: 1,400,000 for KNL).",
     )
     parser.add_argument(
-        "--compare-window-len", default=500, type=int, help="Comparison window length."
+        "--compare-window-len", default=None, type=int, help="Comparison window length."
     )
     parser.add_argument(
         "--compare-window-unit",
