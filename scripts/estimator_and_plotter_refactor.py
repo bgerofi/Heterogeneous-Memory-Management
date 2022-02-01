@@ -602,7 +602,7 @@ if __name__ == "__main__":
         help="CPU cycles per millisecond (default: 1,400,000 for KNL).",
     )
     parser.add_argument(
-        "--compare-window-len", default=50, type=int, help="Comparison window length."
+        "--compare-window-len", default=500, type=int, help="Comparison window length."
     )
     parser.add_argument(
         "--compare-window-unit",
