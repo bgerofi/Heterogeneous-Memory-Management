@@ -106,9 +106,9 @@ class Trace:
         forming a window based on the "Timestamp" column of the pandas data
         frame"
         """
-        s = np.searchsorted(self._data_["Timestamp"], (window_len * win))
-        e = np.searchsorted(self._data_["Timestamp"], (window_len * (win + 1)))
-        return self._subset_(slice(s, e))
+        win_begin = np.searchsorted(self._data_["Timestamp"], (window_len * win))
+        win_end = np.searchsorted(self._data_["Timestamp"], (window_len * (win + 1)))
+        return self._subset_(slice(win_begin, win_end))
         # return self._subset_(
         #     (self._data_["Timestamp"] >= (window_len * win))
         #     & (self._data_["Timestamp"] < (window_len * (win + 1)))
@@ -121,13 +121,13 @@ class Trace:
         frame"
         """
         if win == nr_wins - 1:
-            s = np.searchsorted(self._data_["Instrs"], (window_len * win))
-            return self._subset_(slice(s))
+            win_begin = np.searchsorted(self._data_["Instrs"], (window_len * win))
+            return self._subset_(slice(win_begin))
             # return self._subset_(self._data_["Instrs"] >= (window_len * win))
         else:
-            s = np.searchsorted(self._data_["Instrs"], (window_len * win))
-            e = np.searchsorted(self._data_["Instrs"], (window_len * (win + 1)))
-            return self._subset_(slice(s, e))
+            win_begin = np.searchsorted(self._data_["Instrs"], (window_len * win))
+            win_end = np.searchsorted(self._data_["Instrs"], (window_len * (win + 1)))
+            return self._subset_(slice(win_begin, win_end))
             # return self._subset_(
             #     (self._data_["Instrs"] >= (window_len * win))
             #     & (self._data_["Instrs"] < (window_len * (win + 1)))
@@ -190,22 +190,26 @@ class TraceSet:
         self,
         trace_ddr,
         trace_hbm,
-        trace_measured,
         window_length=50,
         compare_unit="ms",
         verbose=False,
     ):
         self.trace_ddr = trace_ddr
         self.trace_hbm = trace_hbm
-        self.trace_measured = trace_measured
+        self.trace_measured = None
 
         self.nr_win = None
-        self.window_length = None
+        self.window_length = window_length
         self.window_length2 = None
         self.window_length3 = None
+        self.compare_unit = compare_unit
         self.set_window_properties(window_length, compare_unit)
 
         self._verbose_ = verbose
+
+    def set_measured_trace(self, measure_trace):
+        self.trace_measured = measure_trace
+        self.set_window_properties(self.window_length, self.compare_unit)
 
     def set_window_properties(self, window_length, compare_unit):
         """
@@ -313,20 +317,19 @@ class TraceSet:
         trace_hbm = self._subset_window_fn_(
             self.trace_hbm, self.window_length2, win, self.nr_win
         )
-        if self.trace_measured is not None:
-            trace_measured = self._subset_window_fn_(
-                self.trace_measured, self.window_length3, win, self.nr_win
-            )
-        else:
-            trace_measured = None
-        return TraceSet(
+        trace = TraceSet(
             trace_ddr,
             trace_hbm,
-            trace_measured,
             self.window_length,
             self.compare_unit,
             self._verbose_,
         )
+        if self.trace_measured is not None:
+            trace_measured = self._subset_window_fn_(
+                self.trace_measured, self.window_length3, win, self.nr_win
+            )
+            trace.set_measured_trace(trace_measured)
+        return trace
 
     def print_windows_info(self):
         print(
@@ -387,16 +390,13 @@ class Phase(TraceSet):
     def __init__(self, phase, trace_set):
         trace_ddr = trace_set.trace_ddr.get_phases(phase)
         trace_hbm = trace_set.trace_hbm.get_phases(phase)
-        if trace_set.trace_measured is not None:
-            trace_measured = trace_set.trace_measured.get_phases(phase)
-        else:
-            trace_measured = None
         compare_unit = trace_set.compare_unit
         window_length = trace_set.window_length
 
-        super(Phase, self).__init__(
-            trace_ddr, trace_hbm, trace_measured, window_length, compare_unit
-        )
+        super(Phase, self).__init__(trace_ddr, trace_hbm, window_length, compare_unit)
+        if trace_set.trace_measured is not None:
+            trace_measured = trace_set.trace_measured.get_phases(phase)
+            self.set_measured_trace(trace_measured)
         self.phase = phase
 
         if trace_set._verbose_:
@@ -446,106 +446,6 @@ class WindowIterator:
         except ValueError:
             self._set_next_phase_()
             return next(self)
-
-
-class Estimator:
-    """
-    Estimation of execution time for a set of traces and a given set of address
-    intervals mapped into the High Bandwidth Memory (hbm).
-    """
-
-    def estimate(trace_set, hbm_intervals, hbm_factor=1.0):
-        """
-        Estimate execution time of the provided trace set and when some ranges
-        of addresses are mapped in the hbm memory. The weight of hbm accesses
-        can be increased with `hbm_factor` to set the impact of hbm memory
-        access over the overall execution time.
-
-        When execution time in hbm is significantly faster than execution in
-        ddr (> 3% faster), the estimation is computed with
-        `_compute_accurate_estimate_()` function, else it is
-        the average between t_ddr and t_hbm (`_compute_fast_estimate_()`).
-        """
-        # Iterate phases and windows to estimate save time versus actual spent
-        # time.
-        estimated_time = 0
-        measured_time = 0
-        previous_iter_empty = False
-        empty_iter_start = -1
-
-        for window in trace_set:
-            if window.is_empty():
-                previous_iter_empty = True
-                continue
-
-            # Count cumulated time of empty windows.
-            if previous_iter_empty:
-                time_empty = window.time_start() - empty_iter_start
-                measured_time += time_empty
-                estimated_time += time_empty
-            empty_iter_start = window.time_end()
-            previous_iter_empty = False
-
-            # Run estimation on the window.
-            estimated_time += Estimator._estimate_window_(
-                window, hbm_intervals, hbm_factor
-            )
-            measured_time += window.timespan_measured()
-        return estimated_time, measured_time
-
-    def _estimate_window_(window, hbm_intervals, hbm_factor):
-        """
-        This function choses between estimation methods:
-        `_compute_accurate_estimate_()` or `_compute_fast_estimate_()`
-        """
-        t_ddr = window.timespan_ddr()
-        t_hbm = window.timespan_hbm()
-        if t_ddr > (t_hbm * 1.03):
-            return Estimator._compute_accurate_estimate_(
-                window, hbm_intervals, hbm_factor
-            )
-        else:
-            return Estimator._compute_fast_estimate_(window)
-
-    def _compute_accurate_estimate_(window, hbm_intervals, hbm_factor):
-        """
-        This the function computing the actual estimate.
-        """
-        t_ddr = window.timespan_ddr()
-        t_hbm = window.timespan_hbm()
-
-        # Count hbm and ddr accesses
-        ddr_accesses = 0
-        hbm_accesses = 0
-        addresses = (
-            window.trace_measured.virtual_addresses()
-            if window.trace_measured is not None
-            else window.trace_ddr.virtual_addresses()
-        )
-        for vaddr in addresses:
-            if hbm_intervals.overlaps(vaddr):
-                hbm_accesses += 1
-            else:
-                ddr_accesses += 1
-
-        # Compute estimate
-        total_weighted_accesses = float(ddr_accesses + hbm_accesses * hbm_factor)
-        weighted_ratio_of_hbm_access = float(hbm_accesses) / total_weighted_accesses
-        max_saved_time = float(t_ddr - t_hbm)
-        return t_ddr - (max_saved_time * weighted_ratio_of_hbm_access)
-
-    def _compute_fast_estimate_(window):
-        """
-        This function computes the average between time in ddr memory
-        and time hbm memory. This is accurate enough if both times are nearly
-        equal.
-        """
-        t_ddr = window.timespan_ddr()
-        t_hbm = window.timespan_hbm()
-        return (t_ddr - t_hbm) / 2.0
-
-
-if __name__ == "__main__":
 
     class Parser:
         """
@@ -610,15 +510,149 @@ if __name__ == "__main__":
             """
             return [int(i) for i in phases]
 
-    def print_intervals(intervals, prefix=""):
+
+class Parser:
+    """
+    Class to parse input arguments of the program.
+    """
+
+    def parse_addr(addr):
         """
-        Pretty print address intervals.
+        Parse input address and return the address in `int` type.
         """
-        intervals = (
-            "{}{}:{}".format(prefix, "0x%x" % i.begin, "0x%x" % i.end)
-            for i in sorted(intervals)
-        )
-        print("\n".join(intervals))
+        try:
+            return int(addr, 0)
+        except ValueError:
+            raise ValueError(
+                "Invalid address format: {}.\n" "Expected: '<hex>'".format(addr)
+            )
+
+    def parse_interval(interval):
+        """
+        Parse input interval and return a tuple of the smallest and highest
+        addresses with `int` type.
+        """
+        intrvl = interval.split(":")
+        if len(intrvl) != 2:
+            raise ValueError(
+                "Invalid interval format {}.\n"
+                "Expected '<hex>:<hex>'".format(interval)
+            )
+        low = Parser.parse_addr(intrvl[0])
+        high = Parser.parse_addr(intrvl[1])
+        return (low, high) if low < high else (high, low)
+
+    def parse_intervals(intervals):
+        """
+        Parse a list of intervals return a merged IntervalTree() of the
+        intervals.
+        """
+        intrvls = IntervalTree()
+        for i in intervals:
+            low, high = Parser.parse_interval(i)
+            intrvls[low:high] = None
+        intrvls.merge_overlaps()
+        return intrvls
+
+    def parse_name_intervals(name):
+        """
+        Parse hbm intervals contained in the filename of the traces
+        containing measured experiment with arbitrary allocation of data
+        in hbm and ddr memories.
+        """
+        inputs = os.path.basename(name).split("-")
+        inputs = [
+            "{}:{}".format(inputs[i + 1], inputs[i + 2])
+            for i in inputs[::3]
+            if i == "HBM"
+        ]
+        return Parser.parse_intervals(inputs)
+
+    def parse_phases(phases):
+        """
+        Format input phases in a `int` list.
+        """
+        return [int(i) for i in phases]
+
+
+class Estimator:
+    """
+    Estimation of execution time for a set of traces and a given set of address
+    intervals mapped into the High Bandwidth Memory (hbm).
+    """
+
+    def __init__(self, application_traces, page_size=13):
+        # Public
+        self.measured_time = 0
+        # Private
+        self._empty_win_time_ = 0
+        self._traces_ = application_traces
+        self._page_mask_ = ~((1 << int(page_size)) - 1)
+
+    def estimate(self, hbm_intervals, hbm_factor=1.0):
+        """
+        Estimate execution time of the estimator traces with a specific mapping
+        of pages in the hbm memory. The weight of hbm accesses
+        can be increased with `hbm_factor` to set the impact of hbm memory
+        access over the overall execution time.
+        """
+
+        if isinstance(hbm_intervals, Trace):
+            self._trace_.set_measured_trace(hbm_intervals)
+            hbm_intervals = Parser.parse_name_intervals(hbm_intervals.filename)
+
+        measured_time = 0
+        estimated_time = 0
+        empty_time = 0
+        previous_iter_empty = False
+        empty_iter_start = -1
+
+        for window in self._traces_:
+            if window.is_empty():
+                previous_iter_empty = True
+                continue
+            # Count cumulated time of empty windows.
+            if previous_iter_empty:
+                empty_time += window.time_start() - empty_iter_start
+                empty_iter_start = window.time_end()
+                previous_iter_empty = False
+
+            t_ddr = window.timespan_ddr()
+            t_hbm = window.timespan_hbm()
+            measured_time += window.timespan_measured()
+            if t_ddr < 1.03 * t_hbm:
+                estimated_time += self._estimate_fast_(t_ddr, t_hbm)
+            else:
+                estimated_time += self._estimate_accurate_(
+                    window, hbm_intervals, hbm_factor, t_ddr, t_hbm
+                )
+        return estimated_time + empty_time, measured_time + empty_time
+
+    def _estimate_accurate_(self, window, hbm_intervals, hbm_factor, t_ddr, t_hbm):
+        ddr_accesses = 0
+        hbm_accesses = 0
+        for addr in window.trace_ddr.virtual_addresses() & self._page_mask_:
+            if hbm_intervals.overlaps_point(addr):
+                hbm_accesses += 1
+            else:
+                ddr_accesses += 1
+        max_saved_time = t_ddr - t_hbm
+        total_weighted_accesses = float(ddr_accesses + hbm_accesses * hbm_factor)
+        weighted_ratio_of_hbm_access = float(hbm_accesses) / total_weighted_accesses
+        return t_ddr - (max_saved_time * weighted_ratio_of_hbm_access)
+
+    def _estimate_fast_(self, t_ddr, t_hbm):
+        return (t_ddr + t_hbm) / 2.0
+
+
+if __name__ == "__main__":
+    import time
+
+    def time_estimation(estimator, hbm_intevals, hbm_factor):
+        t_start = time.time()
+        t_e, t_m = estimator.estimate(hbm_intevals, hbm_factor)
+        t_end = time.time()
+        return (t_end - t_start), t_e, t_m
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -681,22 +715,21 @@ if __name__ == "__main__":
         type=int,
         help="Subset traces to only contain theses phases.",
     )
+    parser.add_argument(
+        "--page-size",
+        default=13,
+        type=int,
+        help="The size of a page in number of bits.",
+    )
     parser.add_argument("--verbose", default=False, action="store_true")
     args = parser.parse_args()
 
     # Load traces and bundle them together.
     ddr_trace = Trace(args.ddr_input, args.cpu_cycles_per_ms, args.verbose)
     hbm_trace = Trace(args.hbm_input, args.cpu_cycles_per_ms, args.verbose)
-    if args.measured_input is not None:
-        measured_trace = Trace(
-            args.measured_input, args.cpu_cycles_per_ms, args.verbose
-        )
-    else:
-        measured_trace = None
     traces = TraceSet(
         ddr_trace,
         hbm_trace,
-        measured_trace,
         args.compare_window_len,
         args.compare_window_unit,
         args.verbose,
@@ -707,18 +740,40 @@ if __name__ == "__main__":
         traces.subset_phases(phases)
 
     # Compute hbm intervals.
-    hbm_intervals = IntervalTree()
     if args.measured_input is not None:
-        hbm_intervals.update(Parser.parse_name_intervals(args.measured_input))
-    if args.hbm_ranges is not None:
+        hbm_intervals = Trace(args.measured_input, args.cpu_cycles_per_ms, args.verbose)
+    elif args.hbm_ranges is not None:
+        hbm_intervals = IntervalTree()
         for hbm_range in args.hbm_ranges:
             hbm_intervals.update(Parser.parse_intervals(args.hbm_ranges))
-    if args.verbose:
-        Memory.print_intervals(hbm_intervals, "HBM range: ")
+    else:
+        print(
+            "Warning no measure trace or hbm interval has been provided. Putting random pages in hbm."
+        )
+        page_mask = ~((1 << args.page_size) - 1)
+        page_size = 1 << args.page_size
+        hbm_size = 34  # 16GiB
+        max_hbm_pages = 1 << (hbm_size - args.page_size)
+        hbm_intervals = ddr_trace.virtual_addresses()
+        hbm_intervals = np.unique(hbm_intervals & page_mask)
+        num_hbm_pages = min(max_hbm_pages, len(hbm_intervals))
+        np.random.seed(0)
+        np.random.shuffle(hbm_intervals)
+        hbm_intervals = [
+            Interval(i, i + page_size) for i in hbm_intervals[:num_hbm_pages]
+        ]
+        hbm_intervals = IntervalTree(hbm_intervals)
+        hbm_intervals.merge_overlaps()
 
     # Compute estimation for the traces and hbm_intervals.
-    estimated_time, measured_time = Estimator.estimate(
-        traces, hbm_intervals, args.hbm_factor
+    estimator = Estimator(traces)
+    runtime, estimated_time, measured_time = time_estimation(
+        estimator, hbm_intervals, args.hbm_factor
     )
-    print("Time measured: {}".format(measured_time))
-    print("Time estimated: {}".format(estimated_time))
+    hbm_time = traces.timespan_hbm()
+    ddr_time = traces.timespan_ddr()
+    print("Time ddr: {:.2f} (s)".format(ddr_time / 1000.0))
+    print("Time hbm: {:.2f} (s)".format(hbm_time / 1000.0))
+    print("Time measured: {:.2f} (s)".format(measured_time / 1000.0))
+    print("Time estimated: {:.2f} (s)".format(estimated_time / 1000.0))
+    print("Estimator runtime: {:.2f} (s)".format(runtime))
