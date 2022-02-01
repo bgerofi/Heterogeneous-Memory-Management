@@ -3,6 +3,7 @@ import os
 import pandas as pd
 import numpy as np
 import argparse
+import itertools
 from intervaltree import Interval, IntervalTree
 
 
@@ -586,12 +587,23 @@ class Estimator:
     """
 
     def __init__(self, application_traces, page_size=13):
-        # Public
-        self.measured_time = 0
         # Private
-        self._empty_win_time_ = 0
         self._traces_ = application_traces
         self._page_mask_ = ~((1 << int(page_size)) - 1)
+        self._empty_time_ = 0
+
+        # Compute time spent on empty windows.
+        previous_iter_empty = False
+        empty_iter_start = -1
+        for window in self._traces_:
+            if window.is_empty():
+                previous_iter_empty = True
+                continue
+            # Count cumulated time of empty windows.
+            if previous_iter_empty:
+                self._empty_time_ += window.time_start() - empty_iter_start
+                empty_iter_start = window.time_end()
+                previous_iter_empty = False
 
     def estimate(self, hbm_intervals, hbm_factor=1.0):
         """
@@ -604,45 +616,23 @@ class Estimator:
         if isinstance(hbm_intervals, Trace):
             self._trace_.set_measured_trace(hbm_intervals)
             hbm_intervals = Parser.parse_name_intervals(hbm_intervals.filename)
-
-        measured_time = 0
         estimated_time = 0
-        empty_time = 0
-        previous_iter_empty = False
-        empty_iter_start = -1
 
-        for window in self._traces_:
-            if window.is_empty():
-                previous_iter_empty = True
-                continue
-            # Count cumulated time of empty windows.
-            if previous_iter_empty:
-                empty_time += window.time_start() - empty_iter_start
-                empty_iter_start = window.time_end()
-                previous_iter_empty = False
-
+        for window in itertools.filterfalse(lambda w: w.is_empty(), self._traces_):
             t_ddr = window.timespan_ddr()
             t_hbm = window.timespan_hbm()
-            measured_time += window.timespan_measured()
             if t_ddr < 1.03 * t_hbm:
                 estimated_time += self._estimate_fast_(t_ddr, t_hbm)
             else:
                 estimated_time += self._estimate_accurate_(
                     window, hbm_intervals, hbm_factor, t_ddr, t_hbm
                 )
-        return estimated_time + empty_time, measured_time + empty_time
+        return estimated_time + self._empty_time_
 
     def _estimate_fast_(self, t_ddr, t_hbm):
         return (t_ddr + t_hbm) / 2.0
 
     def _estimate_accurate_(self, window, hbm_intervals, hbm_factor, t_ddr, t_hbm):
-        ddr_accesses, hbm_accesses = self._access_window_(window, hbm_intervals)
-        max_saved_time = t_ddr - t_hbm
-        total_weighted_accesses = float(ddr_accesses + hbm_accesses * hbm_factor)
-        weighted_ratio_of_hbm_access = float(hbm_accesses) / total_weighted_accesses
-        return t_ddr - (max_saved_time * weighted_ratio_of_hbm_access)
-
-    def _access_window_(self, window, hbm_intervals):
         ddr_accesses = 0
         hbm_accesses = 0
         addr, count = np.unique(
@@ -653,7 +643,10 @@ class Estimator:
                 hbm_accesses += n
             else:
                 ddr_accesses += n
-        return ddr_accesses, hbm_accesses
+        max_saved_time = t_ddr - t_hbm
+        total_weighted_accesses = float(ddr_accesses + hbm_accesses * hbm_factor)
+        weighted_ratio_of_hbm_access = float(hbm_accesses) / total_weighted_accesses
+        return t_ddr - (max_saved_time * weighted_ratio_of_hbm_access)
 
 
 if __name__ == "__main__":
@@ -661,9 +654,9 @@ if __name__ == "__main__":
 
     def time_estimation(estimator, hbm_intevals, hbm_factor):
         t_start = time.time()
-        t_e, t_m = estimator.estimate(hbm_intevals, hbm_factor)
+        t_e = estimator.estimate(hbm_intevals, hbm_factor)
         t_end = time.time()
-        return (t_end - t_start), t_e, t_m
+        return (t_end - t_start), t_e
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -778,11 +771,10 @@ if __name__ == "__main__":
 
     # Compute estimation for the traces and hbm_intervals.
     estimator = Estimator(traces)
-    runtime, estimated_time, measured_time = time_estimation(
-        estimator, hbm_intervals, args.hbm_factor
-    )
+    runtime, estimated_time = time_estimation(estimator, hbm_intervals, args.hbm_factor)
     hbm_time = traces.timespan_hbm()
     ddr_time = traces.timespan_ddr()
+    measured_time = traces.timespan_measured()
     print("Time ddr: {:.2f} (s)".format(ddr_time / 1000.0))
     print("Time hbm: {:.2f} (s)".format(hbm_time / 1000.0))
     print("Time measured: {:.2f} (s)".format(measured_time / 1000.0))
