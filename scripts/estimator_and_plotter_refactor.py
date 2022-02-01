@@ -176,17 +176,15 @@ class Trace:
 
 class TraceSet:
     """
-    Make a bundle of three traces where the first trace is the trace
+    Make a bundle of two traces where the first trace is the trace
     containing the execution of a single application in DDR memory, the
     second trace is the trace containing the execution of the same application
-    in High Bandwidth Memory (hbm), and the last trace contains an execution of
-    the same application with an arbitrary memory allocation.
-    (The last trace may be `None`.)
+    in High Bandwidth Memory (hbm)
 
     This trace set, iterated with a window iterator, i.e an iterator
     returning a contiguouus subset of elements of the three traces representing
-    the execution of the same region of an application in three different
-    memory set up.
+    the execution of the same region of an application in the two different
+    memory set ups.
 
     The window properties can be set with two knobs:
     window_length and the comparison unit which can be time wise (ms),
@@ -684,8 +682,8 @@ if __name__ == "__main__":
     # Compute estimation for the traces and hbm_intervals.
     estimator = Estimator(traces)
     runtime, estimated_time = time_estimation(estimator, hbm_intervals, args.hbm_factor)
-    hbm_time = traces.timespan_hbm()
-    ddr_time = traces.timespan_ddr()
+    hbm_time = hbm_trace.timespan()
+    ddr_time = ddr_trace.timespan()
     measured_time = (
         Trace(args.measured_input, args.cpu_cycles_per_ms, args.verbose).timespan()
         if args.measured_input is not None
