@@ -106,10 +106,13 @@ class Trace:
         forming a window based on the "Timestamp" column of the pandas data
         frame"
         """
-        return self._subset_(
-            (self._data_["Timestamp"] >= (window_len * win))
-            & (self._data_["Timestamp"] < (window_len * (win + 1)))
-        )
+        s = np.searchsorted(self._data_["Timestamp"], (window_len * win))
+        e = np.searchsorted(self._data_["Timestamp"], (window_len * (win + 1)))
+        return self._subset_(slice(s, e))
+        # return self._subset_(
+        #     (self._data_["Timestamp"] >= (window_len * win))
+        #     & (self._data_["Timestamp"] < (window_len * (win + 1)))
+        # )
 
     def subset_window_instruction(self, window_len, win, nr_wins):
         """
@@ -118,12 +121,17 @@ class Trace:
         frame"
         """
         if win == nr_wins - 1:
-            return self._subset_(self._data_["Instrs"] >= (window_len * win))
+            s = np.searchsorted(self._data_["Instrs"], (window_len * win))
+            return self._subset_(slice(s))
+            # return self._subset_(self._data_["Instrs"] >= (window_len * win))
         else:
-            return self._subset_(
-                (self._data_["Instrs"] >= (window_len * win))
-                & (self._data_["Instrs"] < (window_len * (win + 1)))
-            )
+            s = np.searchsorted(self._data_["Instrs"], (window_len * win))
+            e = np.searchsorted(self._data_["Instrs"], (window_len * (win + 1)))
+            return self._subset_(slice(s, e))
+            # return self._subset_(
+            #     (self._data_["Instrs"] >= (window_len * win))
+            #     & (self._data_["Instrs"] < (window_len * (win + 1)))
+            # )
 
     def subset_window_access(self, window_len, win, nr_wins):
         """
