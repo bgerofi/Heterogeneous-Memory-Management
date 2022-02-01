@@ -357,7 +357,9 @@ class TraceSet:
         else:
             self.nr_win = int(float(t1_e - t1_s) / float(self.window_length))
             # There is at least one window.
-            self.nr_win = 1 if self.nr_win == 0 else self.nr_win
+            if self.nr_win == 0:
+                self.nr_win = 1
+                self.window_length = t1_e - t1_s
         self.window_length2 = int(float(t2_e - t2_s) / float(self.nr_win))
 
 
