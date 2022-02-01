@@ -587,23 +587,42 @@ class Estimator:
     """
 
     def __init__(self, application_traces, page_size=13):
-        # Private
-        self._traces_ = application_traces
-        self._page_mask_ = ~((1 << int(page_size)) - 1)
+        # Time spent on empty window
         self._empty_time_ = 0
+        # Time spent on windows where hbm and ddr had about the same time.
+        self._fast_time_ = 0
+        # For each non empty window: ddr time.
+        self._ddr_time_ = []
+        # For each non empty window: hbm time.
+        self._hbm_time_ = []
+        # For each non empty window: The count for each page access (page, count).
+        self._pages_ = []
 
-        # Compute time spent on empty windows.
+        page_mask = ~((1 << int(page_size)) - 1)
         previous_iter_empty = False
         empty_iter_start = -1
-        for window in self._traces_:
-            if window.is_empty():
+
+        for w in application_traces:
+            if w.is_empty():
                 previous_iter_empty = True
                 continue
-            # Count cumulated time of empty windows.
             if previous_iter_empty:
-                self._empty_time_ += window.time_start() - empty_iter_start
-                empty_iter_start = window.time_end()
+                self._empty_time_ += w.time_start() - empty_iter_start
+                empty_iter_start = w.time_end()
                 previous_iter_empty = False
+
+            t_ddr = w.timespan_ddr()
+            t_hbm = w.timespan_hbm()
+            if t_ddr < 1.03 * t_hbm:
+                self._fast_time_ += self._estimate_fast_(t_ddr, t_hbm)
+            else:
+                addr, count = np.unique(
+                    w.trace_ddr.virtual_addresses() & page_mask,
+                    return_counts=True,
+                )
+                self._pages_.append(list(zip(addr, count)))
+                self._ddr_time_.append(t_ddr)
+                self._hbm_time_.append(t_hbm)
 
     def estimate(self, hbm_intervals, hbm_factor=1.0):
         """
@@ -618,27 +637,21 @@ class Estimator:
             hbm_intervals = Parser.parse_name_intervals(hbm_intervals.filename)
         estimated_time = 0
 
-        for window in itertools.filterfalse(lambda w: w.is_empty(), self._traces_):
-            t_ddr = window.timespan_ddr()
-            t_hbm = window.timespan_hbm()
-            if t_ddr < 1.03 * t_hbm:
-                estimated_time += self._estimate_fast_(t_ddr, t_hbm)
-            else:
-                estimated_time += self._estimate_accurate_(
-                    window, hbm_intervals, hbm_factor, t_ddr, t_hbm
-                )
-        return estimated_time + self._empty_time_
+        for (t_ddr, t_hbm, pages) in zip(
+            self._ddr_time_, self._hbm_time_, self._pages_
+        ):
+            estimated_time += self._estimate_accurate_(
+                pages, hbm_intervals, hbm_factor, t_ddr, t_hbm
+            )
+        return estimated_time + self._empty_time_ + self._fast_time_
 
     def _estimate_fast_(self, t_ddr, t_hbm):
         return (t_ddr + t_hbm) / 2.0
 
-    def _estimate_accurate_(self, window, hbm_intervals, hbm_factor, t_ddr, t_hbm):
+    def _estimate_accurate_(self, pages, hbm_intervals, hbm_factor, t_ddr, t_hbm):
         ddr_accesses = 0
         hbm_accesses = 0
-        addr, count = np.unique(
-            window.trace_ddr.virtual_addresses() & self._page_mask_, return_counts=True
-        )
-        for addr, n in zip(addr, count):
+        for addr, n in pages:
             if hbm_intervals.overlaps_point(addr):
                 hbm_accesses += n
             else:
@@ -646,7 +659,7 @@ class Estimator:
         max_saved_time = t_ddr - t_hbm
         total_weighted_accesses = float(ddr_accesses + hbm_accesses * hbm_factor)
         weighted_ratio_of_hbm_access = float(hbm_accesses) / total_weighted_accesses
-        return t_ddr - (max_saved_time * weighted_ratio_of_hbm_access)
+        return float(t_ddr) - (max_saved_time * weighted_ratio_of_hbm_access)
 
 
 if __name__ == "__main__":
