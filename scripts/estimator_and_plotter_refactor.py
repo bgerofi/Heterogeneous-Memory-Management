@@ -151,22 +151,6 @@ class Trace:
         else:
             return self._subset_(slice(window_len * win, (window_len * (win + 1))))
 
-    def print_phase_info(self, phase):
-        print(
-            "{}: {} accesses in phase {}, "
-            "time window between {} and {} ({}) msecs, "
-            "retired instructions: {}, mem/instr: {}".format(
-                self._data_.filename,
-                len(self._data_),
-                phase,
-                self._data_["Timestamp"].iloc[0],
-                self._data_["Timestamp"].iloc[-1],
-                self._data_["Timestamp"].iloc[-1] - self._data_["Timestamp"].iloc[0],
-                self._data_["Instrs"].iloc[-1],
-                len(self._data_) * 8 / trace["Instrs"].iloc[-1],
-            )
-        )
-
     def __len__(self):
         return self._data_.__len__()
 
@@ -387,8 +371,6 @@ class Phase(TraceSet):
 
     def print_info(self):
         self.print_windows_info()
-        self.trace_ddr.print_info()
-        self.trace_hbm.print_info()
 
 
 class WindowIterator:
@@ -611,10 +593,10 @@ if __name__ == "__main__":
         "--compare-window-len", default=None, type=int, help="Comparison window length."
     )
     parser.add_argument(
-        "--compare-window-unit",
+        "--compare-unit",
         default="ms",
         type=str,
-        help="Comparison window length unit (accesses, ms or instrs).",
+        help="Comparison length unit ('accesses', 'ms' or 'instrs').",
     )
     parser.add_argument(
         "--hbm-factor", default=1.0, type=float, help="HBM weight factor."
@@ -633,7 +615,7 @@ if __name__ == "__main__":
         "--phases",
         action="append",
         type=int,
-        help="Subset traces to only contain theses phases.",
+        help="Subset traces to only contain these phases.",
     )
     parser.add_argument(
         "--page-size",
@@ -651,7 +633,7 @@ if __name__ == "__main__":
         ddr_trace,
         hbm_trace,
         args.compare_window_len,
-        args.compare_window_unit,
+        args.compare_unit,
         args.verbose,
     )
     # Filter phases if needed.
