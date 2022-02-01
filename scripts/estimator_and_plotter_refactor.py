@@ -352,8 +352,8 @@ class TraceSet:
         t1_s, t1_e = self._get_trace_bounds_fn_(self.trace_ddr)
         t2_s, t2_e = self._get_trace_bounds_fn_(self.trace_hbm)
         self.nr_win = int(float(t1_e - t1_s) / float(self.window_length))
-        if self.nr_win == 0:
-            return
+        # There is at least one window.
+        self.nr_win = 1 if self.nr_win == 0 else self.nr_win
         self.window_length2 = int(float(t2_e - t2_s) / float(self.nr_win))
 
 
