@@ -95,7 +95,10 @@ class Trace:
                     phase, available_phases
                 )
             )
-        return self._subset_([p in phase for p in self._data_.Phase])
+        if len(phase) == 1:
+            return self._subset_(self._data_.Phase == phase[0])
+        else:
+            return self._subset_([p in phase for p in self._data_.Phase])
 
     def subset_window_timestamp(self, window_len, win, nr_wins):
         """
