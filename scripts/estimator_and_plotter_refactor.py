@@ -489,8 +489,8 @@ class Estimator:
                 continue
             if previous_iter_empty:
                 self._empty_time_ += float(w.time_start() - empty_iter_start)
-                empty_iter_start = w.time_end()
-                previous_iter_empty = False
+            previous_iter_empty = False
+            empty_iter_start = w.time_end()
 
             t_ddr = w.timespan_ddr()
             t_hbm = w.timespan_hbm()
@@ -535,8 +535,7 @@ class Estimator:
 
         if self._verbose_:
             self.print_estimate_info(estimated_time)
-        # return estimated_time + self._empty_time_ + self._fast_time_
-        return estimated_time + self._fast_time_
+        return estimated_time + self._empty_time_ + self._fast_time_
 
     def _estimate_fast_(self, t_ddr, t_hbm):
         return (t_ddr + t_hbm) / 2.0
@@ -607,14 +606,16 @@ if __name__ == "__main__":
             containing measured experiment with arbitrary allocation of data
             in hbm and ddr memories.
             """
-            regex = re.compile(".*HBM-(?P<begin>0x\w+)-(?P<end>0x\w+).*")
-            match = regex.match(name)
-            if match is None:
-                raise ValueError("Invalid file name. Must contain: HBM-<hex>-<hex>")
-            groups = match.groupdict()
-            begin = int(groups["begin"], 0)
-            end = int(groups["end"], 0)
-            return IntervalTree([Interval(begin, end)])
+            regex = re.compile("HBM-(?P<begin>0x[a-fA-F0-9]+)-(?P<end>0x[a-fA-F0-9]+)-")
+            matches = regex.findall(name)
+            if matches is None or len(matches) == 0:
+                raise ValueError(
+                    "Invalid file name {}. Must contain: HBM-<hex>-<hex>".format(name)
+                )
+            intervals = [Interval(int(m[0], 0), int(m[1], 0)) for m in matches]
+            intervals = IntervalTree(intervals)
+            intervals.merge_overlaps()
+            return intervals
 
         def parse_phases(phases):
             """
