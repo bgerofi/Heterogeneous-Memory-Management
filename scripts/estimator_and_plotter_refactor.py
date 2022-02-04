@@ -184,9 +184,11 @@ class Trace:
         frame"
         """
         if win == nr_wins - 1:
-            return self._subset_(slice(window_len * win))
+            return self._subset_(slice(int(window_len * win)))
         else:
-            return self._subset_(slice(window_len * win, (window_len * (win + 1))))
+            return self._subset_(
+                slice(int(window_len * win), int(window_len * (win + 1)))
+            )
 
     def __len__(self):
         return self._data_.__len__()
@@ -609,9 +611,11 @@ if __name__ == "__main__":
             regex = re.compile("HBM-(?P<begin>0x[a-fA-F0-9]+)-(?P<end>0x[a-fA-F0-9]+)-")
             matches = regex.findall(name)
             if matches is None or len(matches) == 0:
-                raise ValueError(
-                    "Invalid file name {}. Must contain: HBM-<hex>-<hex>".format(name)
+                print(
+                    "Warning measure file name does not contain HBM ranges. "
+                    "Must contain: HBM-<hex>-<hex>".format(name)
                 )
+                return IntervalTree()
             intervals = [Interval(int(m[0], 0), int(m[1], 0)) for m in matches]
             intervals = IntervalTree(intervals)
             intervals.merge_overlaps()
@@ -694,7 +698,7 @@ if __name__ == "__main__":
         type=str,
         help=(
             "Memory ranges that are placed in high-bandwidth memory "
-            "(e.g., 0x2aaaf9144000-0x2aaafabd0000)"
+            "(e.g., 0x2aaaf9144000:0x2aaafabd0000)"
         ),
     )
     parser.add_argument(
@@ -731,30 +735,15 @@ if __name__ == "__main__":
         traces.subset_phases(phases)
 
     # Compute hbm intervals.
+    hbm_intervals = IntervalTree()
     if args.measured_input is not None:
         hbm_intervals = Parser.parse_name_intervals(args.measured_input)
-    elif args.hbm_ranges is not None:
+    if args.hbm_ranges is not None:
         hbm_intervals = IntervalTree()
         for hbm_range in args.hbm_ranges:
             hbm_intervals.update(Parser.parse_intervals(args.hbm_ranges))
-    else:
-        print(
-            "Warning no measure trace or hbm interval has been provided. Putting random pages in hbm."
-        )
-        page_mask = ~((1 << args.page_size) - 1)
-        page_size = 1 << args.page_size
-        hbm_size = 34  # 16GiB
-        max_hbm_pages = 1 << (hbm_size - args.page_size)
-        hbm_intervals = ddr_trace.virtual_addresses()
-        hbm_intervals = np.unique(hbm_intervals & page_mask)
-        num_hbm_pages = min(max_hbm_pages, len(hbm_intervals))
-        np.random.seed(0)
-        np.random.shuffle(hbm_intervals)
-        hbm_intervals = [
-            Interval(i, i + page_size) for i in hbm_intervals[:num_hbm_pages]
-        ]
-        hbm_intervals = IntervalTree(hbm_intervals)
-        hbm_intervals.merge_overlaps()
+    if len(hbm_intervals) == 0:
+        raise ValueError("No HBM intervals provided.")
 
     # Compute estimation for the traces and hbm_intervals.
     estimator = Estimator(traces, page_size=args.page_size, verbose=args.verbose)
