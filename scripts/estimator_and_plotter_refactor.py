@@ -24,7 +24,7 @@ class Trace:
         data["Timestamp"] = data["Timestamp"].div(cpu_cycles_per_ms)
         if "Phase" not in data.columns:
             data = data.assign(Phase=0)
-
+        data["Instrs"] = np.cumsum(data["Instrs"].astype(float))
         self._data_ = data
         self.filename = filename
 
@@ -151,7 +151,7 @@ class Trace:
                 self._data_["Instrs"],
                 self._data_["Instrs"].iloc[0] + (window_len * win),
             )
-            return self._subset_(slice(win_begin))
+            return self._subset_(slice(win_begin, -1))
             # return self._subset_(
             #     self._data_["Instrs"]
             #     >= self._data_["Instrs"].iloc[0] + (window_len * win)
@@ -393,7 +393,10 @@ class TraceSet:
         try:
             t_hbm = self._get_trace_bounds_fn_(self.trace_hbm)
         except IndexError:
+            self.window_length2 == 0
+            self.nr_win = 0
             return
+
         self.window_length2 = t_hbm / self.nr_win
 
 
