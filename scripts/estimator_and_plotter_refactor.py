@@ -24,7 +24,11 @@ class Trace:
         data["Timestamp"] = data["Timestamp"].div(cpu_cycles_per_ms)
         if "Phase" not in data.columns:
             data = data.assign(Phase=0)
-        data["Instrs"] = np.cumsum(data["Instrs"])
+
+        for phase in range(1, data["Phase"].iloc[-1]):
+            i = np.searchsorted(data["Phase"], phase)
+            data.loc[i:, "Instrs"] += data["Instrs"][i - 1]
+
         self._data_ = data
         self.filename = filename
 
@@ -752,7 +756,11 @@ if __name__ == "__main__":
     error = float(abs(estimated_time - measured_time)) / float(abs(ddr_time - hbm_time))
     print("Time DDR: {:.2f} (s)".format(ddr_time / 1000.0))
     print("Time HBM: {:.2f} (s)".format(hbm_time / 1000.0))
-    print("Time Measured: {:.2f} (s)".format(measured_time / 1000.0))
+    if args.measured_input is not None:
+        print("Time Measured: {:.2f} (s)".format(measured_time / 1000.0))
     print("Time Estimated: {:.2f} (s)".format(estimated_time / 1000.0))
-    print("Estimation Relative Error: {:.2f}%".format(100.0 * error))
+    if args.measured_input is not None:
+        print("Estimation Relative Error: {:.2f}%".format(100.0 * error))
     print("Estimator Runtime: {:.8f} (s)".format(runtime))
+    if args.measured_input is not None:
+        print("Estimator Speedup: {:.0f}".format(measured_time / (1000.0 * runtime)))
