@@ -135,10 +135,6 @@ class Trace:
             self._data_["Timestamp"].iloc[0] + (window_len * (win + 1)),
         )
         return self._subset_(slice(win_begin, win_end))
-        # return self._subset_(
-        #     (self._data_["Timestamp"] >= self._data_["Timestamp"].iloc[0] + (window_len * win))
-        #     & (self._data_["Timestamp"] < self._data_["Timestamp"].iloc[0] + (window_len * (win + 1)))
-        # )
 
     def subset_window_instruction(self, window_len, win, nr_wins):
         """
@@ -152,10 +148,6 @@ class Trace:
                 self._data_["Instrs"].iloc[0] + (window_len * win),
             )
             return self._subset_(slice(win_begin, -1))
-            # return self._subset_(
-            #     self._data_["Instrs"]
-            #     >= self._data_["Instrs"].iloc[0] + (window_len * win)
-            # )
         else:
             win_begin = np.searchsorted(
                 self._data_["Instrs"],
@@ -166,16 +158,6 @@ class Trace:
                 self._data_["Instrs"].iloc[0] + (window_len * (win + 1)),
             )
             return self._subset_(slice(win_begin, win_end))
-            # return self._subset_(
-            #     (
-            #         self._data_["Instrs"]
-            #         >= self._data_["Instrs"].iloc[0] + (window_len * win)
-            #     )
-            #     & (
-            #         self._data_["Instrs"]
-            #         < self._data_["Instrs"].iloc[0] + (window_len * (win + 1))
-            #     )
-            # )
 
     def subset_window_access(self, window_len, win, nr_wins):
         """
@@ -393,7 +375,6 @@ class TraceSet:
         try:
             t_hbm = self._get_trace_bounds_fn_(self.trace_hbm)
         except IndexError:
-            self.window_length2 == 0
             self.nr_win = 0
             return
 
