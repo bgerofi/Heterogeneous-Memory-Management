@@ -749,8 +749,10 @@ if __name__ == "__main__":
         if args.measured_input is not None
         else 0
     )
+    error = float(abs(estimated_time - measured_time)) / float(abs(ddr_time - hbm_time))
     print("Time DDR: {:.2f} (s)".format(ddr_time / 1000.0))
     print("Time HBM: {:.2f} (s)".format(hbm_time / 1000.0))
     print("Time Measured: {:.2f} (s)".format(measured_time / 1000.0))
     print("Time Estimated: {:.2f} (s)".format(estimated_time / 1000.0))
+    print("Estimation Relative Error: {:.2f}%".format(100.0 * error))
     print("Estimator Runtime: {:.8f} (s)".format(runtime))
