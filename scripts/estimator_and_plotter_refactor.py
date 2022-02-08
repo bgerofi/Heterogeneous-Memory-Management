@@ -24,7 +24,7 @@ class Trace:
         data["Timestamp"] = data["Timestamp"].div(cpu_cycles_per_ms)
         if "Phase" not in data.columns:
             data = data.assign(Phase=0)
-        data["Instrs"] = np.cumsum(data["Instrs"].astype(float))
+        data["Instrs"] = np.cumsum(data["Instrs"])
         self._data_ = data
         self.filename = filename
 
@@ -687,11 +687,18 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-p",
-        "--phases",
+        "--filter-phases",
         metavar="<int>",
         action="append",
         type=int,
         help="Subset traces to only contain these phases.",
+    )
+    parser.add_argument(
+        "--singlify-phases",
+        default=False,
+        action="store_true",
+        help="Mark all the phases in the trace as phase 0. This option is "
+        "treated after --filter-phases option.",
     )
     parser.add_argument(
         "--page-size",
@@ -714,9 +721,12 @@ if __name__ == "__main__":
         args.verbose,
     )
     # Filter phases if needed.
-    if args.phases is not None:
+    if args.filter_phases is not None:
         phases = [int(i) for i in args.phases]
         traces.subset_phases(phases)
+    # Make a single phase if needed.
+    if args.singlify_phases:
+        traces.singlify_phases()
 
     # Compute hbm intervals.
     hbm_intervals = IntervalTree()
@@ -743,4 +753,4 @@ if __name__ == "__main__":
     print("Time HBM: {:.2f} (s)".format(hbm_time / 1000.0))
     print("Time Measured: {:.2f} (s)".format(measured_time / 1000.0))
     print("Time Estimated: {:.2f} (s)".format(estimated_time / 1000.0))
-    print("Estimator Runtime: {:.2f} (s)".format(runtime))
+    print("Estimator Runtime: {:.8f} (s)".format(runtime))
