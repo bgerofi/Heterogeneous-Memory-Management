@@ -17,14 +17,14 @@ class Trace:
     """
 
     def __init__(self, filename, cpu_cycles_per_ms, verbose=False):
-        # if verbose:
-        #     print("Loading from {}...".format(filename))
-
         data = pd.read_feather(filename)
+
+        # Make Timestamp as milliseconds
         data["Timestamp"] = data["Timestamp"].div(cpu_cycles_per_ms)
         if "Phase" not in data.columns:
             data = data.assign(Phase=0)
 
+        # Make instructions as an increasing number.
         for phase in range(1, data["Phase"].iloc[-1]):
             i = np.searchsorted(data["Phase"], phase)
             data.loc[i:, "Instrs"] += data["Instrs"][i - 1]
