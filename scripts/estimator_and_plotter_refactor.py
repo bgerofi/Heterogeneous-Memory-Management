@@ -184,7 +184,7 @@ class Trace:
         frame"
         """
         if win == nr_wins - 1:
-            return self._subset_(slice(int(window_len * win)))
+            return self._subset_(slice(int(window_len * win), -1))
         else:
             return self._subset_(
                 slice(int(window_len * win), int(window_len * (win + 1)))
