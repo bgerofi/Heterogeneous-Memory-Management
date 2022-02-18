@@ -67,6 +67,9 @@ class Trace:
         except IndexError:
             return 0.0
 
+    def timestamps(self):
+        self._data_["Timestamp"].values
+
     def virtual_addresses(self):
         """
         Get the virtual address of each sample in the trace.
