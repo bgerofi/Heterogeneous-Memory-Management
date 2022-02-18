@@ -27,3 +27,6 @@ class IntervalDetector:
             return (i - next(iter(self.intervals[i])).begin for i in vaddr)
         except TypeError:
             return vaddr - next(iter(self.intervals[vaddr])).begin
+
+    def __iter__(self):
+        return iter(self.intervals)
