@@ -18,7 +18,9 @@ class TraceEnv(Env):
         self.traces = TraceSet(
             trace_ddr, trace_hbm, window_length, compare_unit="accesses"
         )
-        self._intervals_ = (
+
+        # The intervals where data is mapped.
+        self._access_intervals_ = (
             IntervalDetector(interval_distance, page_size)
             .append_addr(trace_ddr.virtual_addresses())
             .append_addr(trace_hbm.virtual_addresses())
@@ -34,7 +36,7 @@ class TraceEnv(Env):
         self._estimated_time_ = 0
 
         # Gym specific attributes
-        pages_per_interval = self._intervals_.max_interval_num_pages()
+        pages_per_interval = self._access_intervals_.max_interval_num_pages()
         self.observation_space = spaces.MultiDiscrete(
             np.repeat(pages_per_interval, window_length)
         )
@@ -46,7 +48,7 @@ class TraceEnv(Env):
         """
         Translate a trace window into an observation usable by the AI.
         """
-        page_offset_ids = list(self._intervals_.indexof(window.trace_ddr))
+        page_offset_ids = list(self._access_intervals_.indexof(window.trace_ddr))
         if len(page_offset_ids) < self._window_len_:
             page_offset_ids += np.repeat(-1, self._window_len_ - len(page_offset_ids))
         elif len(page_offset_ids) > self._window_len_:
@@ -60,10 +62,10 @@ class TraceEnv(Env):
         """
 
         num_moves = 0
-        for actions, interval in zip(action, self._intervals_):
-            num_pages = self._intervals_.interval_num_pages(interval)
-            addresses = self._intervals_.addressof(range(num_pages), interval)
-            low, high = self._intervals_.page_bounds(addresses)
+        for actions, interval in zip(action, self._access_intervals_):
+            num_pages = self._access_intervals_.interval_num_pages(interval)
+            low = self._access_intervals_.addressof(range(num_pages), interval)
+            high = low + self._access_intervals_._page_size_
 
             for do_set, l, h in zip(actions, low, high):
                 page = Interval(l, h)
@@ -95,6 +97,7 @@ class TraceEnv(Env):
         self._move_pages_time_ = 0
         self._estimated_time_ = 0
         try:
+            # The void action when the hbm is empty.
             action = np.zeros(self.action_space.n, dtype=self.action_space.dtype)
             obs, _, _, _ = self.step(action)
             return obs
