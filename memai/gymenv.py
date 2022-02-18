@@ -48,7 +48,9 @@ class TraceEnv(Env):
         """
         Translate a trace window into an observation usable by the AI.
         """
-        page_offset_ids = list(self._access_intervals_.indexof(window.trace_ddr))
+        page_offset_ids = list(
+            self._access_intervals_.indexof(window.trace_ddr.virtual_addressses())
+        )
         if len(page_offset_ids) < self._window_len_:
             page_offset_ids += np.repeat(-1, self._window_len_ - len(page_offset_ids))
         elif len(page_offset_ids) > self._window_len_:
