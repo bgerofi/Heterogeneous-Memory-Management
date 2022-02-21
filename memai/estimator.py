@@ -2,6 +2,44 @@
 import numpy as np
 
 
+class EstimatorWindowsIter:
+    def __init__(self, application_traces, page_mask):
+        self.window_iter = iter(application_traces)
+        self.page_mask = page_mask
+        self.previous_iter_empty = False
+        self.empty_iter_start = -1
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        window = next(self.window_iter)
+        empty_time = 0.0
+        fast_time = 0.0
+        ddr_time = 0.0
+        hbm_time = 0.0
+        pages = []  # A list of tuples (addr, num_accesses) for the window.
+
+        if window.is_empty():
+            self.previous_iter_empty = True
+        else:
+            if self.previous_iter_empty:
+                empty_time = float(window.time_start() - self.empty_iter_start)
+            self.previous_iter_empty = False
+            self.empty_iter_start = window.time_end()
+            ddr_time = window.timespan_ddr()
+            hbm_time = window.timespan_hbm()
+            if hbm_time * 1.03 >= ddr_time:
+                fast_time = Estimator.estimate_fast(ddr_time, hbm_time)
+            else:
+                addr, count = np.unique(
+                    window.trace_ddr.virtual_addresses() & self.page_mask,
+                    return_counts=True,
+                )
+                pages = list(zip(addr, count))
+        return empty_time, fast_time, ddr_time, hbm_time, pages
+
+
 class Estimator:
     """
     Estimation of execution time for a set of traces and a given set of address
@@ -19,33 +57,33 @@ class Estimator:
         self._hbm_time_ = []
         # For each non empty window: The count for each page access (page, count).
         self._pages_ = []
+
         self._verbose_ = verbose
 
-        page_mask = ~((1 << int(page_size)) - 1)
-        previous_iter_empty = False
-        empty_iter_start = -1
+        page_mask = Estimator.page_mask(page_size)
+        for empty_time, fast_time, ddr_time, hbm_time, pages in EstimatorWindowsIter(
+            application_traces, page_mask
+        ):
+            self._empty_time_ += empty_time
+            self._fast_time_ += fast_time
+            self._ddr_time_.append(ddr_time)
+            self._hbm_time_.append(hbm_time)
+            self._pages_.append(pages)
 
-        for w in application_traces:
-            if w.is_empty():
-                previous_iter_empty = True
-                continue
-            if previous_iter_empty:
-                self._empty_time_ += float(w.time_start() - empty_iter_start)
-            previous_iter_empty = False
-            empty_iter_start = w.time_end()
+    @staticmethod
+    def from_iter(empty_time, fast_time, ddr_time, hbm_time, pages):
+        estimator = Estimator.__new__()
+        estimator._empty_time_ = empty_time
+        estimator._fast_time_ = fast_time
+        estimator._ddr_time_ = [ddr_time]
+        estimator._hbm_time_ = [hbm_time]
+        estimator._pages_ = [pages]
+        estimator._verbose_ = False
+        return estimator
 
-            t_ddr = w.timespan_ddr()
-            t_hbm = w.timespan_hbm()
-            if t_hbm * 1.03 >= t_ddr:
-                self._fast_time_ += self._estimate_fast_(t_ddr, t_hbm)
-            else:
-                addr, count = np.unique(
-                    w.trace_ddr.virtual_addresses() & page_mask,
-                    return_counts=True,
-                )
-                self._pages_.append(list(zip(addr, count)))
-                self._ddr_time_.append(t_ddr)
-                self._hbm_time_.append(t_hbm)
+    @staticmethod
+    def page_mask(page_size):
+        return ~((1 << int(page_size)) - 1)
 
     def print_estimate_info(self, estimated_time):
         print(
@@ -79,10 +117,14 @@ class Estimator:
             self.print_estimate_info(estimated_time)
         return estimated_time + self._empty_time_ + self._fast_time_
 
-    def _estimate_fast_(self, t_ddr, t_hbm):
+    @staticmethod
+    def estimate_fast(t_ddr, t_hbm):
         return (t_ddr + t_hbm) / 2.0
 
     def _estimate_accurate_(self, pages, hbm_intervals, hbm_factor, t_ddr, t_hbm):
+        if len(pages) == 0:
+            return 0.0
+
         ddr_accesses = 0
         hbm_accesses = 0
         for addr, n in pages:
