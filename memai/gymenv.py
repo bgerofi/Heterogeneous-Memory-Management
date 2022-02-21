@@ -1,5 +1,64 @@
 from memai import Estimator, TraceSet, Trace, IntervalDetector, AddressSpace
 from gym import Env, spaces
+import numpy as np
+from intervaltree import IntervalTree
+
+class AddressSpace:
+    def __init__(self, intervals, page_size=1 << 14):
+        self._index_addr_ = []
+        self._addr_index_ = {}
+        self._page_mask_ = ~(page_size - 1)
+        self.page_size = page_size
+
+        i = 0
+        for interval in intervals:
+            low = interval.begin & self._page_mask_
+            high = interval.end & self._page_mask_
+            high = high + page_size if high != interval.end else high
+            self.index_addr += list(range(low, high, page_size))
+            self._addr_index_.update(
+                {addr: i + j for j, addr in enumerate(range(low, high, page_size))}
+            )
+            i += (high - low) / page_size
+
+    def addr_index(self, addr):
+        try:
+            return self._addr_index_[addr & self._page_mask_]
+        except KeyError:
+            raise ValueError("Invalid address not in address space.")
+
+    def index_addr(self, i):
+        return self._index_addr_[i]
+
+    def __len__(self):
+        return len(self._index_address_)
+
+    def __getitem__(self, addr):
+        return self.addr_index(addr)
+
+
+class IntervalDetector:
+    def __init__(self, interval_distance=1 << 22, page_size=1 << 14):
+        self.intervals = IntervalTree()
+        self._page_mask_ = ~(page_size - 1)
+        self._interval_distance_ = interval_distance * page_size
+
+    def append_addresses(self, vaddr):
+        low_vaddr, high_vaddr = self._page_bounds_(vaddr)
+        for low, high in zip(low_vaddr, high_vaddr):
+            self.intervals[low:high] = 0
+        self.intervals.merge_overlaps()
+        return self
+
+    def _page_bounds_(self, vaddr):
+        if isinstance(vaddr, list):
+            vaddr = np.array(vaddr)
+        if isinstance(vaddr, (np.ndarray, np.array)):
+            vaddr = vaddr.reshape(1, len(b))
+        low = (vaddr & self._page_mask_) - self._interval_distance_
+        low = np.apply_along_axis(lambda i: max(i, 0), 0, low)
+        high = (vaddr + self._interval_distance_) & self._page_mask_
+        return low, high
 
 
 class EstimatorIter:
@@ -96,7 +155,7 @@ class TraceEnv(Env):
             ret[self._address_space_.addr_index(addr), i] = 1
         return ret
 
-    def _move_pages_(self, action):
+    def move_pages(self, action):
         """
         Move pages in self._hbm_intervals_ according to `action` and
         return the time spent moving pages in milliseconds.
@@ -151,7 +210,7 @@ class TraceEnv(Env):
             self._estimated_time_ += estimated_time
 
             # Do action (move pages) and retrieve move pages penalty.
-            move_pages_time = self._move_pages_(action)
+            move_pages_time = self.move_pages(action)
             self._move_pages_time_ += move_pages_time
 
             # The reward is negative for moving pages (we want to avoid that)
