@@ -1,9 +1,9 @@
-from memai import Estimator, TraceSet, Trace, IntervalDetector
+from memai import Estimator, TraceSet, Trace, IntervalDetector, AddressSpace
 from gym import Env, spaces
 
 
 class EstimatorIter:
-    def __new__(self, traces, page_size, max_window_len, access_intervals):
+    def __new__(self, traces, page_size, max_window_size, address_space):
         self._empty_time_ = 0.0
         self._estimators_ = []
         self._observations_ = []
@@ -18,7 +18,7 @@ class EstimatorIter:
                     0.0, fast_time, ddr_time, hbm_time, pages
                 )
                 observation = TraceEnv._observation_(
-                    window, max_window_len, access_intervals
+                    window, max_window_size, access_intervals
                 )
                 self._estimators_.append(estimator)
                 self._observations_.append(observation)
@@ -57,47 +57,39 @@ class TraceEnv(Env):
 
         # The intervals where data is mapped.
         if managed_intervals is not None:
-            self._access_intervals_ = IntervalDetector(
-                managed_intervals, page_size, interval_distance
-            )
+            self._address_space_ = AddressSpace(managed_intervals, page_size)
         else:
-            self._access_intervals_ = (
+            intervals = (
                 IntervalDetector(interval_distance, page_size)
                 .append_addr(trace_ddr.virtual_addresses())
                 .append_addr(trace_hbm.virtual_addresses())
+                .intervals
             )
+            self._address_space_ = AddressSpace(intervals, page_size)
+
         self._hbm_intervals_ = IntervalTree()
         self._window_len_ = window_len
         self._estimator_iterator_ = EstimatorIter(
-            self.traces, page_size, self._window_len, self._access_intervals_
+            self.traces, page_size, self._window_len, self._address_space_
         )
         self._move_page_penalty_ = float(move_page_penalty)
         self._move_pages_time_ = 0.0
         self._estimated_time_ = self._estimator_iterator_._empty_time_
 
         # Gym specific attributes
-        pages_per_interval = self._access_intervals_.max_interval_len()
-        self.observation_space = spaces.MultiDiscrete(
-            np.repeat(pages_per_interval, window_length)
-        )
-        self.action_space = spaces.MultiBinary(
-            np.repeat(num_intervals, pages_per_interval)
-        )
+        num_pages = len(self._address_space_)
+        self.observation_space = spaces.MultiDiscrete([num_pages, window_length])
+        self.action_space = spaces.MultiBinary([num_pages])
 
     @staticmethod
-    def _observation_(window, max_window_len, access_intervals):
+    def _observation_(window, max_window_size, address_space):
         """
         Translate a trace window into an observation usable by the AI.
         """
-        page_offset_ids = [
-            access_intervals.interval_addr_index(addr)
-            for addr in window.trace_ddr.virtual_addressses()
-        ]
-        if len(page_offset_ids) < max_window_len:
-            page_offset_ids += np.repeat(-1, max_window_len - len(page_offset_ids))
-        elif len(page_offset_ids) > max_window_len:
-            raise ValueError("The trace window length exceeds the set window length.")
-        return page_offset_ids
+        ret = np.zeros((len(address_space), max_window_size))
+        for i, addr in enumerate(window.trace_ddr.virtual_addressses()):
+            ret[address_space.addr_index(addr), i] = 1
+        return ret
 
     def _move_pages_(self, action):
         """
@@ -106,22 +98,17 @@ class TraceEnv(Env):
         """
 
         num_moves = 0
-        for actions, interval in zip(action, self._access_intervals_):
-            num_pages = self._access_intervals_.interval_len(interval)
-            low = self._access_intervals_.interval_addr_at(range(num_pages), interval)
-            high = low + self._access_intervals_._page_size_
-
-            for do_set, l, h in zip(actions, low, high):
-                page = Interval(l, h)
-                is_set = page in self._hbm_intervals_
-                if do_set:
-                    if not is_set:
-                        num_moves += 1
-                        self._hbm_intervals_.add(page)
-                else:
-                    if is_set:
-                        num_moves += 1
-                        self._hbm_intervals_.remove(page)
+        for do_set, addr in zip(action, self._address_space_._index_addr_):
+            is_set = page in self._hbm_intervals_
+            page = Interval(addr, addr + address_space.page_size)
+            if do_set:
+                if not is_set:
+                    num_moves += 1
+                    self._hbm_intervals_.add(page)
+            else:
+                if is_set:
+                    num_moves += 1
+                    self._hbm_intervals_.remove(page)
 
         self._hbm_intervals_.merge_overlaps()
         return num_moves * self._move_page_penalty_
