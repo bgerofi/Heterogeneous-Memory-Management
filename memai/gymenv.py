@@ -3,7 +3,7 @@ from gym import Env, spaces
 
 
 class EstimatorIter:
-    def __new__(self, traces, page_size):
+    def __new__(self, traces, page_size, max_window_len, access_intervals):
         self._empty_time_ = 0.0
         self._estimators_ = []
         self._observations_ = []
@@ -17,7 +17,9 @@ class EstimatorIter:
                 estimator = Estimator.from_iter(
                     0.0, fast_time, ddr_time, hbm_time, pages
                 )
-                observation = TraceEnv._observation_(window)
+                observation = TraceEnv._observation_(
+                    window, max_window_len, access_intervals
+                )
                 self._estimators_.append(estimator)
                 self._observations_.append(observation)
 
@@ -42,6 +44,7 @@ class TraceEnv(Env):
         trace_hbm_file,
         cpu_cycles_per_ms,
         window_length=50,
+        managed_intervals=None,
         interval_distance=1 << 22,
         page_size=1 << 14,
         move_page_penalty=10.0,
@@ -53,20 +56,27 @@ class TraceEnv(Env):
         )
 
         # The intervals where data is mapped.
-        self._access_intervals_ = (
-            IntervalDetector(interval_distance, page_size)
-            .append_addr(trace_ddr.virtual_addresses())
-            .append_addr(trace_hbm.virtual_addresses())
-        )
+        if managed_intervals is not None:
+            self._access_intervals_ = IntervalDetector(
+                managed_intervals, page_size, interval_distance
+            )
+        else:
+            self._access_intervals_ = (
+                IntervalDetector(interval_distance, page_size)
+                .append_addr(trace_ddr.virtual_addresses())
+                .append_addr(trace_hbm.virtual_addresses())
+            )
         self._hbm_intervals_ = IntervalTree()
-        self._estimator_iterator_ = EstimatorIter(self.traces, page_size)
-        self._move_page_penalty_ = float(move_page_penalty)
         self._window_len_ = window_len
+        self._estimator_iterator_ = EstimatorIter(
+            self.traces, page_size, self._window_len, self._access_intervals_
+        )
+        self._move_page_penalty_ = float(move_page_penalty)
         self._move_pages_time_ = 0.0
         self._estimated_time_ = self._estimator_iterator_._empty_time_
 
         # Gym specific attributes
-        pages_per_interval = self._access_intervals_.max_interval_num_pages()
+        pages_per_interval = self._access_intervals_.max_interval_len()
         self.observation_space = spaces.MultiDiscrete(
             np.repeat(pages_per_interval, window_length)
         )
@@ -75,16 +85,17 @@ class TraceEnv(Env):
         )
 
     @staticmethod
-    def _observation_(window):
+    def _observation_(window, max_window_len, access_intervals):
         """
         Translate a trace window into an observation usable by the AI.
         """
-        page_offset_ids = list(
-            self._access_intervals_.indexof(window.trace_ddr.virtual_addressses())
-        )
-        if len(page_offset_ids) < self._window_len_:
-            page_offset_ids += np.repeat(-1, self._window_len_ - len(page_offset_ids))
-        elif len(page_offset_ids) > self._window_len_:
+        page_offset_ids = [
+            access_intervals.interval_addr_index(addr)
+            for addr in window.trace_ddr.virtual_addressses()
+        ]
+        if len(page_offset_ids) < max_window_len:
+            page_offset_ids += np.repeat(-1, max_window_len - len(page_offset_ids))
+        elif len(page_offset_ids) > max_window_len:
             raise ValueError("The trace window length exceeds the set window length.")
         return page_offset_ids
 
@@ -96,8 +107,8 @@ class TraceEnv(Env):
 
         num_moves = 0
         for actions, interval in zip(action, self._access_intervals_):
-            num_pages = self._access_intervals_.interval_num_pages(interval)
-            low = self._access_intervals_.addressof(range(num_pages), interval)
+            num_pages = self._access_intervals_.interval_len(interval)
+            low = self._access_intervals_.interval_addr_at(range(num_pages), interval)
             high = low + self._access_intervals_._page_size_
 
             for do_set, l, h in zip(actions, low, high):
