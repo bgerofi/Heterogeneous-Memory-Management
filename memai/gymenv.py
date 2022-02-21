@@ -3,7 +3,7 @@ from gym import Env, spaces
 
 
 class EstimatorIter:
-    def __new__(self, traces, page_size, max_window_size, address_space):
+    def __new__(self, traces, page_size, trace_env):
         self._empty_time_ = 0.0
         self._estimators_ = []
         self._observations_ = []
@@ -17,9 +17,7 @@ class EstimatorIter:
                 estimator = Estimator.from_iter(
                     0.0, fast_time, ddr_time, hbm_time, pages
                 )
-                observation = TraceEnv._observation_(
-                    window, max_window_size, access_intervals
-                )
+                observation = trace_env.observation(window)
                 self._estimators_.append(estimator)
                 self._observations_.append(observation)
 
@@ -44,17 +42,12 @@ class TraceEnv(Env):
         trace_hbm_file,
         cpu_cycles_per_ms,
         window_length=50,
+        max_managed_address=None,
         managed_intervals=None,
         interval_distance=1 << 22,
         page_size=1 << 14,
         move_page_penalty=10.0,
     ):
-        trace_ddr = Trace(trace_ddr_file, cpu_cycles_per_ms)
-        trace_hbm = Trace(trace_hbm_file, cpu_cycles_per_ms)
-        self.traces = TraceSet(
-            trace_ddr, trace_hbm, window_length, compare_unit="accesses"
-        )
-
         # The intervals where data is mapped.
         if managed_intervals is not None:
             self._address_space_ = AddressSpace(managed_intervals, page_size)
@@ -66,29 +59,41 @@ class TraceEnv(Env):
                 .intervals
             )
             self._address_space_ = AddressSpace(intervals, page_size)
+        num_pages = len(self._address_space_)
+        if max_managed_address is None:
+            max_managed_address = num_pages
+        if num_pages > max_managed_address:
+            raise ValueError(
+                "The maximum amount of address that can be managed exceeeds the amount of pages to manage."
+            )
+        self._num_pages_ = max_managed_address
 
-        self._hbm_intervals_ = IntervalTree()
-        self._window_len_ = window_len
-        self._estimator_iterator_ = EstimatorIter(
-            self.traces, page_size, self._window_len, self._address_space_
+        trace_ddr = Trace(trace_ddr_file, cpu_cycles_per_ms)
+        trace_hbm = Trace(trace_hbm_file, cpu_cycles_per_ms)
+        self.traces = TraceSet(
+            trace_ddr, trace_hbm, window_length, compare_unit="accesses"
         )
+
+        self._observations_shape_ = (max_managed_address, window_len)
+        self._hbm_intervals_ = IntervalTree()
         self._move_page_penalty_ = float(move_page_penalty)
         self._move_pages_time_ = 0.0
+        self._estimator_iterator_ = EstimatorIter(
+            self.traces, page_size, observation_shape, self._address_space_
+        )
         self._estimated_time_ = self._estimator_iterator_._empty_time_
 
         # Gym specific attributes
-        num_pages = len(self._address_space_)
-        self.observation_space = spaces.MultiDiscrete([num_pages, window_length])
-        self.action_space = spaces.MultiBinary([num_pages])
+        self.observation_space = spaces.MultiBinary(list(self._observations_shape_))
+        self.action_space = spaces.MultiBinary([max_managed_address])
 
-    @staticmethod
-    def _observation_(window, max_window_size, address_space):
+    def observation(self, window):
         """
         Translate a trace window into an observation usable by the AI.
         """
-        ret = np.zeros((len(address_space), max_window_size))
+        ret = np.zeros(self._observations_shape_, dtype=self.observation_space.dtype)
         for i, addr in enumerate(window.trace_ddr.virtual_addressses()):
-            ret[address_space.addr_index(addr), i] = 1
+            ret[self._address_space_.addr_index(addr), i] = 1
         return ret
 
     def _move_pages_(self, action):
