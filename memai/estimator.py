@@ -37,7 +37,7 @@ class EstimatorWindowsIter:
                     return_counts=True,
                 )
                 pages = list(zip(addr, count))
-        return empty_time, fast_time, ddr_time, hbm_time, pages
+        return window, empty_time, fast_time, ddr_time, hbm_time, pages
 
 
 class Estimator:
@@ -61,7 +61,7 @@ class Estimator:
         self._verbose_ = verbose
 
         page_mask = Estimator.page_mask(page_size)
-        for empty_time, fast_time, ddr_time, hbm_time, pages in EstimatorWindowsIter(
+        for _, empty_time, fast_time, ddr_time, hbm_time, pages in EstimatorWindowsIter(
             application_traces, page_mask
         ):
             self._empty_time_ += empty_time

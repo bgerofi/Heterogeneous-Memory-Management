@@ -2,6 +2,39 @@ from memai import Estimator, TraceSet, Trace, IntervalDetector
 from gym import Env, spaces
 
 
+class EstimatorIter:
+    def __new__(self, traces, page_size):
+        self._empty_time_ = 0.0
+        self._estimators_ = []
+        self._observations_ = []
+        self._index_ = 0
+
+        for i, item in enumerate(EstimatorWindowsIter(application_traces, page_size)):
+            window, empty_time, fast_time, ddr_time, hbm_time, pages = item
+
+            self._empty_time_ += empty_time
+            if len(pages) != 0:
+                estimator = Estimator.from_iter(
+                    0.0, fast_time, ddr_time, hbm_time, pages
+                )
+                observation = TraceEnv._observation_(window)
+                self._estimators_.append(estimator)
+                self._observations_.append(observation)
+
+    def __iter__(self):
+        try:
+            observation = self._observations_[self._index_]
+            estimator = self._estimators_[self._index_]
+            ret = (observation, estimator)
+            self._index_ += 1
+            return ret
+        except IndexError:
+            raise StopIteration
+
+    def reset(self):
+        self._index_ = 0
+
+
 class TraceEnv(Env):
     def __init__(
         self,
@@ -11,7 +44,7 @@ class TraceEnv(Env):
         window_length=50,
         interval_distance=1 << 22,
         page_size=1 << 14,
-        move_page_penalty=10,
+        move_page_penalty=10.0,
     ):
         trace_ddr = Trace(trace_ddr_file, cpu_cycles_per_ms)
         trace_hbm = Trace(trace_hbm_file, cpu_cycles_per_ms)
@@ -26,14 +59,11 @@ class TraceEnv(Env):
             .append_addr(trace_hbm.virtual_addresses())
         )
         self._hbm_intervals_ = IntervalTree()
-        self._window_iterator_ = iter(self.traces)
-        self._page_size_ = int(np.log2(page_size))
-        self._move_page_penalty_ = move_page_penalty
+        self._estimator_iterator_ = EstimatorIter(self.traces, page_size)
+        self._move_page_penalty_ = float(move_page_penalty)
         self._window_len_ = window_len
-        self._previous_iter_empty_ = False
-        self._empty_iter_start_ = -1
-        self._move_pages_time_ = 0
-        self._estimated_time_ = 0
+        self._move_pages_time_ = 0.0
+        self._estimated_time_ = self._estimator_iterator_._empty_time_
 
         # Gym specific attributes
         pages_per_interval = self._access_intervals_.max_interval_num_pages()
@@ -44,6 +74,7 @@ class TraceEnv(Env):
             np.repeat(num_intervals, pages_per_interval)
         )
 
+    @staticmethod
     def _observation_(window):
         """
         Translate a trace window into an observation usable by the AI.
@@ -93,11 +124,9 @@ class TraceEnv(Env):
     ):
         super().reset(seed=seed)
         self._hbm_intervals_ = IntervalTree()
-        self._window_iterator_ = iter(traces)
-        self._previous_iter_empty_ = False
-        self._empty_iter_start_ = -1
-        self._move_pages_time_ = 0
-        self._estimated_time_ = 0
+        self._estimator_iterator_.reset()
+        self._move_pages_time_ = 0.0
+        self._estimated_time_ = self._estimator_iterator_._empty_time_
         try:
             # The void action when the hbm is empty.
             action = np.zeros(self.action_space.n, dtype=self.action_space.dtype)
@@ -108,22 +137,14 @@ class TraceEnv(Env):
 
     def step(self, action: ActType):
         try:
-            # Get next window and manage empty windows.
-            window = next(self.traces)
-            if window.is_empty():
-                self._previous_iter_empty_ = True
+            # Get next window.
+            observation, estimator = next(self._estimator_iterator_)
+            self._estimated_time_ += empty_time
+            if estimator is None:
                 return self.step(action)
-            if self._previous_iter_empty_:
-                self._estimated_time_ += float(
-                    window.time_start() - self._empty_iter_start_
-                )
-            self._previous_iter_empty_ = False
-            self._empty_iter_start_ = window.time_end()
 
             # Estimate time elapsed before action.
-            estimated_time = Estimator(window, self._page_size_).estimate(
-                self._hbm_intervals
-            )
+            estimated_time = estimator.estimate(self._hbm_intervals)
             self._estimated_time_ += estimated_time
 
             # Do action (move pages) and retrieve move pages penalty.
@@ -135,7 +156,6 @@ class TraceEnv(Env):
             # (we want to minimize elapsed time).
             reward = -1.0 * move_pages_time - estimated_time
             stop = False
-            observation = TraceEnv._observation_(window)
         except StopIteration:
             reward = 0
             stop = True
