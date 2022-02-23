@@ -140,7 +140,7 @@ class WindowObservationSpace(Space):
         if isinstance(x, TraceSet):
             return True
         elif isinstance(x, ndarray):
-            return x.shape == self.shape
+            return len(x.shape) == 2
         else:
             return False
 
