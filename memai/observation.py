@@ -16,14 +16,6 @@ class WindowObservationSpace(Space):
         shape = [num_samples, num_addresses]
         super().__init__(shape, np.float64, seed)
 
-    def copy(self):
-        obs = WindowObservationSpace.__new__()
-        obs._shape = self.shape
-        obs.dtype = self.dtype
-        obs._np_random = self._np_random
-        obs.seed = self.seed
-        return obs
-
     def from_ndarray(self, ndarray):
         if len(ndarray.shape) != 2:
             raise ValueError(
