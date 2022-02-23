@@ -8,12 +8,12 @@ def slen(s: slice):
 
 
 class WindowObservationSpace(Space):
-    def __init__(self, num_samples, num_addresses, seed=None):
+    def __init__(self, nrows, ncols, seed=None):
 
-        if num_samples <= 0 or num_addresses <= 0:
-            raise ValueError("Invalid input. num_samples > 0 and num_addresses > 0.")
+        if nrows <= 0 or ncols <= 0:
+            raise ValueError("Invalid input. nrows > 0 and ncols > 0.")
 
-        shape = [num_samples, num_addresses]
+        shape = [nrows, ncols]
         super().__init__(shape, np.float64, seed)
 
     def from_ndarray(self, ndarray):
