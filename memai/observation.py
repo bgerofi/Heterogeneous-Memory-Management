@@ -1,6 +1,5 @@
 import numpy as np
 import unittest
-from memai import TraceSet
 from gym.spaces import Space
 
 
@@ -8,72 +7,54 @@ def slen(s: slice):
     return s.stop - s.start
 
 
-class WindowObservation(Space):
-    def __init__(self, num_samples, num_addresses, seed=None):
+class WindowObservationSpace(Space):
+    def __init__(self, num_samples, num_addresses, max_access=np.inf, seed=None):
 
         if num_samples <= 0 or num_addresses <= 0:
             raise ValueError("Invalid input. num_samples > 0 and num_addresses > 0.")
 
         shape = [num_samples, num_addresses]
         super().__init__(shape, np.float64, seed)
-        self._ndarray = np.empty(shape, dtype=self.dtype)
 
     def copy(self):
-        obs = WindowObservation.__new__()
-        obs.shape = self.shape
+        obs = WindowObservationSpace.__new__()
+        obs._shape = self.shape
         obs.dtype = self.dtype
         obs._np_random = self._np_random
         obs.seed = self.seed
-        obs._ndarray = self._ndarray.copy()
         return obs
-
-    @property
-    def ndarray(self):
-        return self._ndarray
-
-    def num_addresses(self):
-        return self.shape[1]
-
-    def num_samples(self):
-        return self.shape[0]
-
-    def zero(self):
-        self._ndarray = np.zeros(self.shape, dtype=self.dtype)
-        return self
 
     def from_ndarray(self, ndarray):
         if len(ndarray.shape) != 2:
             raise ValueError(
                 "Invalid ndarray for observation. Array must have 2 dimensions"
             )
+        if ndarray.dtype != self.dtype:
+            ndarray = ndarray.astype(self.dtype)
 
         # Scale rows
         if ndarray.shape[0] > self.shape[0]:
-            _ndarray = np.empty((self.shape[0], ndarray.shape[1]))
-            WindowObservation._shrink_rows(ndarray, _ndarray)
+            _ndarray = np.empty((self.shape[0], ndarray.shape[1]), dtype=self.dtype)
+            WindowObservationSpace._shrink_rows(ndarray, _ndarray)
         elif ndarray.shape[0] < self.shape[0]:
-            _ndarray = np.empty((self.shape[0], ndarray.shape[1]))
-            WindowObservation._grow_rows(ndarray, _ndarray)
+            _ndarray = np.empty((self.shape[0], ndarray.shape[1]), dtype=self.dtype)
+            WindowObservationSpace._grow_rows(ndarray, _ndarray)
         else:
             _ndarray = ndarray
 
         # Scale columns
         if ndarray.shape[1] > self.shape[1]:
-            WindowObservation._shrink_columns(_ndarray, self._ndarray)
+            ndarray = np.empty(self.shape, dtype=self.dtype)
+            WindowObservationSpace._shrink_columns(_ndarray, ndarray)
         elif ndarray.shape[1] < self.shape[1]:
-            WindowObservation._grow_columns(_ndarray, self._ndarray)
+            ndarray = np.empty(self.shape, dtype=self.dtype)
+            WindowObservationSpace._grow_columns(_ndarray, ndarray)
         else:
-            self._ndarray = _ndarray
+            ndarray = _ndarray
 
-        return self
+        return ndarray
 
-    def from_window(self, window):
-        if not isinstance(window, TraceSet):
-            raise ValueError(
-                "Invalid window type {}. Expected TraceSet.".format(type(window))
-            )
-
-        vaddr = np.array(window.trace_ddr.virtual_addresses(), dtype=np.int64)
+    def from_addresses(self, vaddr):
         # Use offsets instead of addresses
         vaddr = vaddr - np.nanmin(vaddr)
         # Create the array of observations with no observed sample
@@ -83,6 +64,10 @@ class WindowObservation(Space):
             ndarray[i, addr] = 1.0
         # Scale the ndarray to fit this observation shape.
         return self.from_ndarray(ndarray)
+
+    def from_window(self, window):
+        vaddr = np.array(window.trace_ddr.virtual_addresses(), dtype=np.int64)
+        return self.from_addresses(vaddr)
 
     @staticmethod
     def _shrink_rows(from_array, to_array):
@@ -161,73 +146,67 @@ class WindowObservation(Space):
 
     def contains(self, x) -> bool:
         if isinstance(x, TraceSet):
-            x = self.copy().from_window(x)._ndarray
-        elif isinstance(x, WindowObservation):
-            # Scale x to the right size.
-            if x.shape != self.shape:
-                x = self.copy().from_ndarray(x._ndarray)
-            x = x._ndarray
-        elif isinstance(x, np.ndarray):
-            x = self.copy().from_ndarray(x)._ndarray
+            return True
+        elif isinstance(x, ndarray):
+            return x.shape == self.shape
         else:
-            raise ValueError("Invalid observation type {}.".format(type(x)))
-        return all(x <= self._ndarray)
+            return False
 
 
 class TestWindowObservation(unittest.TestCase):
     def test_same_size(self):
         array = np.empty((2, 2))
         array[:] = 1
-        obs = WindowObservation(2, 2).from_ndarray(array)
-        self.assertTrue(array.tolist() == obs._ndarray.tolist())
+        obs_array = WindowObservationSpace(2, 2).from_ndarray(array)
+        self.assertTrue(array.tolist() == obs_array.tolist())
 
     def test_grow_lines(self):
         array = np.empty((2, 2))
         array[:] = 1
         comp_array = np.empty((4, 2))
         comp_array[:] = 0.5
-        obs = WindowObservation(4, 2).from_ndarray(array)
-        self.assertTrue(comp_array.tolist() == obs._ndarray.tolist())
+        obs_array = WindowObservationSpace(4, 2).from_ndarray(array)
+        self.assertTrue(comp_array.tolist() == obs_array.tolist())
 
     def test_grow_columns(self):
         array = np.empty((2, 2))
         array[:] = 1
         comp_array = np.empty((2, 4))
         comp_array[:] = 0.5
-        obs = WindowObservation(2, 4).from_ndarray(array)
-        self.assertTrue(comp_array.tolist() == obs._ndarray.tolist())
+        obs_array = WindowObservationSpace(2, 4).from_ndarray(array)
+        self.assertTrue(comp_array.tolist() == obs_array.tolist())
 
     def test_grow(self):
         array = np.empty((2, 2))
         array[:] = 1
         comp_array = np.empty((4, 4))
         comp_array[:] = 0.25
-        obs = WindowObservation(4, 4).from_ndarray(array)
-        self.assertTrue(comp_array.tolist() == obs._ndarray.tolist())
+        obs_array = WindowObservationSpace(4, 4).from_ndarray(array)
+        self.assertTrue(comp_array.tolist() == obs_array.tolist())
 
     def test_shrink_lines(self):
         array = np.empty((4, 4))
         array[:] = 1
         comp_array = np.empty((2, 4))
         comp_array[:] = 2
-        obs = WindowObservation(2, 4).from_ndarray(array)
-        self.assertTrue(comp_array.tolist() == obs._ndarray.tolist())
+        obs_array = WindowObservationSpace(2, 4).from_ndarray(array)
+        self.assertTrue(comp_array.tolist() == obs_array.tolist())
 
     def test_shrink_columns(self):
         array = np.empty((4, 4))
         array[:] = 1
         comp_array = np.empty((4, 2))
         comp_array[:] = 2
-        obs = WindowObservation(4, 2).from_ndarray(array)
-        self.assertTrue(comp_array.tolist() == obs._ndarray.tolist())
+        obs_array = WindowObservationSpace(4, 2).from_ndarray(array)
+        self.assertTrue(comp_array.tolist() == obs_array.tolist())
 
     def test_shrink(self):
         array = np.empty((4, 4))
         array[:] = 1
         comp_array = np.empty((2, 2))
         comp_array[:] = 4
-        obs = WindowObservation(2, 2).from_ndarray(array)
-        self.assertTrue(comp_array.tolist() == obs._ndarray.tolist())
+        obs_array = WindowObservationSpace(2, 2).from_ndarray(array)
+        self.assertTrue(comp_array.tolist() == obs_array.tolist())
 
 
 if __name__ == "__main__":
