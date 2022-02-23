@@ -8,7 +8,7 @@ def slen(s: slice):
 
 
 class WindowObservationSpace(Space):
-    def __init__(self, num_samples, num_addresses, max_access=np.inf, seed=None):
+    def __init__(self, num_samples, num_addresses, seed=None):
 
         if num_samples <= 0 or num_addresses <= 0:
             raise ValueError("Invalid input. num_samples > 0 and num_addresses > 0.")

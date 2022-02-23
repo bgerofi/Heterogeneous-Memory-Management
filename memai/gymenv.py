@@ -102,22 +102,19 @@ class TraceEnv(Env):
         cpu_cycles_per_ms,
         window_length=50,
         max_managed_address=None,
-        managed_intervals=None,
         interval_distance=1 << 22,
         page_size=1 << 14,
         move_page_penalty=10.0,
     ):
         # The intervals where data is mapped.
-        if managed_intervals is not None:
-            self._address_space_ = AddressSpace(managed_intervals, page_size)
-        else:
-            intervals = (
-                IntervalDetector(interval_distance, page_size)
-                .append_addr(trace_ddr.virtual_addresses())
-                .append_addr(trace_hbm.virtual_addresses())
-                .intervals
-            )
-            self._address_space_ = AddressSpace(intervals, page_size)
+        intervals = (
+            IntervalDetector(interval_distance, page_size)
+            .append_addr(trace_ddr.virtual_addresses())
+            .append_addr(trace_hbm.virtual_addresses())
+            .intervals
+        )
+        self._address_space_ = AddressSpace(intervals, page_size)
+        
         num_pages = len(self._address_space_)
         if max_managed_address is None:
             max_managed_address = num_pages
