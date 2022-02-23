@@ -9,18 +9,18 @@ def slen(s: slice):
 
 
 class WindowObservation(Space):
-    def __init__(self, num_addresses, num_samples, seed=None):
+    def __init__(self, num_samples, num_addresses, seed=None):
 
         if num_samples <= 0 or num_addresses <= 0:
             raise ValueError("Invalid input. num_samples > 0 and num_addresses > 0.")
 
-        shape = [num_addresses, num_samples]
+        shape = [num_samples, num_addresses]
         super().__init__(shape, np.float64, seed)
         self._ndarray = np.empty(shape, dtype=self.dtype)
 
     def copy(self):
         obs = WindowObservation.__new__()
-        obs._shape = self._shape
+        obs.shape = self.shape
         obs.dtype = self.dtype
         obs._np_random = self._np_random
         obs.seed = self.seed
@@ -32,10 +32,10 @@ class WindowObservation(Space):
         return self._ndarray
 
     def num_addresses(self):
-        return self.shape[0]
+        return self.shape[1]
 
     def num_samples(self):
-        return self.shape[1]
+        return self.shape[0]
 
     def zero(self):
         self._ndarray = np.zeros(self.shape, dtype=self.dtype)
@@ -47,26 +47,24 @@ class WindowObservation(Space):
                 "Invalid ndarray for observation. Array must have 2 dimensions"
             )
 
-        num_addresses = ndarray.shape[0]
-        num_samples = ndarray.shape[1]
-
-        # Scale addresses
-        if num_addresses > self.num_addresses():
-            addr_ndarray = np.empty((self.num_addresses(), num_samples))
-            WindowObservation._shrink_addresses(ndarray, addr_ndarray)
-        elif num_addresses < self.num_addresses():
-            addr_ndarray = np.empty((self.num_addresses(), num_samples))
-            WindowObservation._grow_addresses(ndarray, addr_ndarray)
+        # Scale rows
+        if ndarray.shape[0] > self.shape[0]:
+            _ndarray = np.empty((self.shape[0], ndarray.shape[1]))
+            WindowObservation._shrink_rows(ndarray, _ndarray)
+        elif ndarray.shape[0] < self.shape[0]:
+            _ndarray = np.empty((self.shape[0], ndarray.shape[1]))
+            WindowObservation._grow_rows(ndarray, _ndarray)
         else:
-            addr_ndarray = ndarray
+            _ndarray = ndarray
 
-        # Scale samples
-        if num_samples > self.num_samples():
-            WindowObservation._shrink_samples(addr_ndarray, self._ndarray)
-        elif num_samples < self.num_samples():
-            WindowObservation._grow_samples(addr_ndarray, self._ndarray)
+        # Scale columns
+        if ndarray.shape[1] > self.shape[1]:
+            WindowObservation._shrink_columns(_ndarray, self._ndarray)
+        elif ndarray.shape[1] < self.shape[1]:
+            WindowObservation._grow_columns(_ndarray, self._ndarray)
         else:
-            self._ndarray = addr_ndarray
+            self._ndarray = _ndarray
+
         return self
 
     def from_window(self, window):
@@ -77,17 +75,17 @@ class WindowObservation(Space):
 
         vaddr = np.array(window.trace_ddr.virtual_addresses(), dtype=np.int64)
         # Use offsets instead of addresses
-        vaddr = vaddr - min(vaddr)
+        vaddr = vaddr - np.nanmin(vaddr)
         # Create the array of observations with no observed sample
-        ndarray = np.zeros((max(vaddr), len(vaddr)), dtype=self.dtype)
+        ndarray = np.zeros((len(vaddr), np.nanmax(vaddr)), dtype=self.dtype)
         # Set samples with a default value.
         for i, addr in enumerate(vaddr):
-            ndarray[addr, i] = 1.0
+            ndarray[i, addr] = 1.0
         # Scale the ndarray to fit this observation shape.
         return self.from_ndarray(ndarray)
 
     @staticmethod
-    def _shrink_addresses(from_array, to_array):
+    def _shrink_rows(from_array, to_array):
         from_shape = from_array.shape
         to_shape = to_array.shape
 
@@ -104,7 +102,7 @@ class WindowObservation(Space):
             to_array[i, :] = np.sum(from_array[slice_i, :], 0)
 
     @staticmethod
-    def _shrink_samples(from_array, to_array):
+    def _shrink_columns(from_array, to_array):
         from_shape = from_array.shape
         to_shape = to_array.shape
 
@@ -121,7 +119,7 @@ class WindowObservation(Space):
             to_array[:, j] = np.sum(from_array[:, slice_j], 1)
 
     @staticmethod
-    def _grow_addresses(from_array, to_array):
+    def _grow_rows(from_array, to_array):
         from_shape = from_array.shape
         to_shape = to_array.shape
 
@@ -138,7 +136,7 @@ class WindowObservation(Space):
             to_array[slice_i, :] = from_array[i, :] / slen(slice_i)
 
     @staticmethod
-    def _grow_samples(from_array, to_array):
+    def _grow_columns(from_array, to_array):
         from_shape = from_array.shape
         to_shape = to_array.shape
 
