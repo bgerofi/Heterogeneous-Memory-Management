@@ -53,13 +53,10 @@ class WindowObservationSpace(Space):
         ndarray = np.zeros((len(vaddr), np.nanmax(vaddr)), dtype=self.dtype)
         # Set samples with a default value.
         for i, addr in enumerate(vaddr):
-            ndarray[i, addr] = 1.0
+            if addr is not np.nan:
+                ndarray[i, addr] = 1.0
         # Scale the ndarray to fit this observation shape.
         return self.from_ndarray(ndarray)
-
-    def from_window(self, window):
-        vaddr = np.array(window.trace_ddr.virtual_addresses(), dtype=np.int64)
-        return self.from_addresses(vaddr)
 
     @staticmethod
     def _shrink_rows(from_array, to_array):
