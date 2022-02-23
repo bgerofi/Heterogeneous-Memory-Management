@@ -132,8 +132,9 @@ class Estimator:
                 hbm_accesses += n
             else:
                 ddr_accesses += n
+        hbm_accesses = float(hbm_accesses) * hbm_factor
         max_saved_time = t_ddr - t_hbm
-        total_weighted_accesses = float(ddr_accesses) + float(hbm_accesses) * hbm_factor
+        total_weighted_accesses = float(ddr_accesses) + float(hbm_accesses)
         return t_ddr - (max_saved_time * float(hbm_accesses) / total_weighted_accesses)
 
 
