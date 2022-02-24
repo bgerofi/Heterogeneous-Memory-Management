@@ -47,8 +47,6 @@ class WindowObservationSpace(Space):
         return ndarray
 
     def from_addresses(self, vaddr):
-        # Use offsets instead of addresses
-        vaddr = vaddr - np.nanmin(vaddr)
         # Create the array of observations with no observed sample
         ndarray = np.zeros((len(vaddr), np.nanmax(vaddr)), dtype=self.dtype)
         # Set samples with a default value.
@@ -136,7 +134,7 @@ class WindowObservationSpace(Space):
     def contains(self, x) -> bool:
         if isinstance(x, TraceSet):
             return True
-        elif isinstance(x, ndarray):
+        elif isinstance(x, np.ndarray):
             return len(x.shape) == 2
         else:
             return False
