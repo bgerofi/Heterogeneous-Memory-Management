@@ -28,30 +28,58 @@ class TraceEnv(Env):
         self.action_space = action_space
 
         self._traces = trace_set
-        self._interval_distance = interval_distance
-        self._page_size = page_size
         self._progress_bar = tqdm.tqdm()
-        self._reset()
+        self._reset(page_size, interval_distance)
 
-    def _reset(self):
-        self._mmap_intervals = IntervalDetector(
-            self._interval_distance, self._page_size
-        )
+    def _reset(self, page_size, interval_distance):
+        self._mmap_intervals = IntervalDetector(interval_distance, page_size)
         self._hbm_intervals = IntervalTree()
         self._estimated_time = 0.0
         self._move_pages_time = 0.0
+
         self._previous_window_empty = False
         self._empty_window_start = 0
+        self._progress_bar.reset(total=int(self._traces.time_end()))
         self._windows = iter(self._traces)
         self._interval_observations = iter([])
-        self._estimation = None
-        self._interval = None
-        self._progress_bar.reset(total=int(self._traces.time_end()))
+        self.previous_interval = None
 
-    def _next_window(self):
+    @property
+    def page_size(self):
+        return self._mmap_intervals.page_size
+
+    @property
+    def page_shift(self):
+        return self._mmap_intervals.page_shift
+
+    @property
+    def page_mask(self):
+        return self._mmap_intervals.page_mask
+
+    @property
+    def interval_distance(self):
+        return self._mmap_intervals.interval_distance
+
+    @property
+    def estimated_time(self):
+        return self._estimated_time
+
+    @property
+    def move_pages_time(self):
+        return self._move_pages_time
+
+    def next_observation(self):
+        try:
+            interval, observation = next(self._interval_observations)
+            self.previous_interval = interval
+            return observation
+        except StopIteration:
+            self.next_window()
+            return self.next_observation()
+
+    def next_window(self):
         window = next(self._windows)
 
-        self._progress_bar.update(int(window.timespan_ddr()))
         # Iterate empty windows.
         while window.is_empty():
             self._previous_window_empty = True
@@ -68,21 +96,19 @@ class TraceEnv(Env):
         self._mmap_intervals.append_addresses(window.trace_hbm.virtual_addresses())
 
         # Compute time estimation for the window
-        self._estimation = Estimator(window, int(np.log2(self._page_size))).estimate(
-            self._hbm_intervals
-        )
-        self._estimated_time += self._estimation
+        self._estimated_time += Estimator(
+            window, self._mmap_intervals.page_shift
+        ).estimate(self._hbm_intervals)
 
         # For each mmapped interval build an observation
         observations = []
         for interval in self._mmap_intervals:
-            i_begin = interval.begin >> self._mmap_intervals._page_shift
-            i_end = interval.end >> self._mmap_intervals._page_shift
+            i_begin = interval.begin >> self.page_shift
+            i_end = interval.end >> self.page_shift
             _interval = Interval(i_begin, i_end)
-
             addr = window.trace_ddr.virtual_addresses()
-            addr = addr & self._mmap_intervals._page_mask
-            addr = addr >> self._mmap_intervals._page_shift
+            addr = addr & self.page_mask
+            addr = addr >> self.page_shift
             addr = np.array([x if x in _interval else -1 for x in addr], dtype=np.int64)
             try:
                 min_addr = np.nanmin([x for x in addr if x >= 0])
@@ -90,41 +116,38 @@ class TraceEnv(Env):
                 print("addr: [{}, {}]".format(min(addr), max(addr)))
                 print("interval: [{}, {}]".format(i_begin, i_end))
                 observation = self.observation_space.from_addresses(addr)
-                observations.append(observation)
+                observations.append((interval, observation))
             except ValueError:
                 # If no address is greater there is no address in this interval.
                 continue
 
-        self._interval_observations = zip(self._mmap_intervals, observations)
+        self._interval_observations = iter(observations)
+        self._progress_bar.update(int(window.timespan_ddr()))
 
     def step(self, action):
         try:
-            # Get next window, associated observations and estimator.
-            interval, observation = next(self._interval_observations)
-
             # Do action (move pages) and retrieve move pages penalty.
-            if self._interval is not None:
+            if self.previous_interval is not None:
                 move_pages_time = self.action_space.do_action(
-                    action, self._interval, self._hbm_intervals
+                    action, self.previous_interval, self._hbm_intervals
                 )
             else:
                 move_pages_time = 0
-            self._interval = interval
-            self._move_pages_time_ += move_pages_time
+            self._move_pages_time += move_pages_time
+
+            # Get next window, associated observations and estimator.
+            observation = self.next_observation()
 
             # The reward is negative for moving pages (we want to avoid that)
             reward = -1.0 * move_pages_time
             stop = False
+
         except StopIteration:
-            try:
-                self._next_window()
-                return self.step(action)
-            except StopIteration:
-                # The reward is negative for the total elapsed time
-                # (we want to minimize elapsed time).
-                reward = -1.0 * self._estimated_time
-                stop = True
-                observation = None
+            # The reward is negative for the total elapsed time
+            # (we want to minimize elapsed time).
+            reward = -1.0 * self.estimated_time
+            stop = True
+            observation = None
 
         debug_info = {}
         return observation, reward, stop, debug_info
@@ -137,7 +160,7 @@ class TraceEnv(Env):
         options=None,
     ):
         super().reset(seed=seed)
-        self._reset()
+        self._reset(self.page_size(), self.interval_distance())
         try:
             # The void action when the hbm is empty.
             action = np.zeros(self.action_space.n, dtype=self.action_space.dtype)

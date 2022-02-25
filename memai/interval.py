@@ -14,14 +14,15 @@ class IntervalDetector:
                     page_size, float(int(page_shift)), page_shift
                 )
             )
-        self._page_shift = int(page_shift)
-        self._page_mask = ~(page_size - 1)
+        self.page_shift = int(page_shift)
+        self.page_mask = ~(page_size - 1)
+        self.page_size = page_size
 
         # This is to make intervals aligned on a page boundary and to avoid computing
         # the page address when looking up intervals.
         if interval_distance < page_size or interval_distance % page_size != 0:
             raise ValueError("Interval distance must be a multiple of page size.")
-        self._interval_distance_ = interval_distance
+        self.interval_distance = interval_distance
 
     def append_addresses(self, vaddr):
         low_vaddr, high_vaddr = self._page_bounds_(vaddr)
@@ -37,10 +38,10 @@ class IntervalDetector:
         return self
 
     def _page_bounds_(self, vaddr):
-        low = (vaddr & self._page_mask) - self._interval_distance_
+        low = (vaddr & self.page_mask) - self.interval_distance
         low = low.reshape((1, low.size))
         low = np.apply_along_axis(lambda i: max(i, 0), 0, low)
-        high = (vaddr + self._interval_distance_) & self._page_mask
+        high = (vaddr + self.interval_distance) & self.page_mask
         return low, high
 
     @property
