@@ -134,7 +134,9 @@ class Estimator:
                 ddr_accesses += n
         weighted_hbm_accesses = float(hbm_accesses) * hbm_factor
         hbm_saved_time = t_ddr - t_hbm
-        hbm_saving_factor = float(weighted_hbm_accesses) / float(ddr_accesses + weighted_hbm_accesses)
+        hbm_saving_factor = float(weighted_hbm_accesses) / float(
+            ddr_accesses + weighted_hbm_accesses
+        )
         return t_ddr - (hbm_saved_time * hbm_saving_factor)
 
 

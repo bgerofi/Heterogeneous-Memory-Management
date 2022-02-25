@@ -12,6 +12,7 @@ setup(
         "numpy(==1.22.0)",
         "intervaltree(==3.1.0)",
         "pandas(==1.3.5)",
+        "tqdm(==4.62.3)"
     ],
     packages=["memai"],
     scripts=["memai/estimator.py"],

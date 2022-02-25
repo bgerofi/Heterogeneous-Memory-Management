@@ -6,9 +6,22 @@ from intervaltree import IntervalTree
 class IntervalDetector:
     def __init__(self, interval_distance=1 << 22, page_size=1 << 14):
         self._intervals = IntervalTree()
+
+        page_shift = np.log2(page_size)
+        if float(int(page_shift)) != page_shift:
+            raise ValueError(
+                "Page size must be a power of 2. {} {} {}".format(
+                    page_size, float(int(page_shift)), page_shift
+                )
+            )
+        self._page_shift = int(page_shift)
         self._page_mask = ~(page_size - 1)
-        self._page_shift = int(np.log2(page_size))
-        self._interval_distance_ = interval_distance * page_size
+
+        # This is to make intervals aligned on a page boundary and to avoid computing
+        # the page address when looking up intervals.
+        if interval_distance < page_size or interval_distance % page_size != 0:
+            raise ValueError("Interval distance must be a multiple of page size.")
+        self._interval_distance_ = interval_distance
 
     def append_addresses(self, vaddr):
         low_vaddr, high_vaddr = self._page_bounds_(vaddr)
@@ -44,18 +57,20 @@ class IntervalDetector:
 class TestIntervalDetector(unittest.TestCase):
     def test_detector(self):
         intervals = IntervalDetector(interval_distance=4, page_size=2)
-        addresses = np.array([0, 15, 30, 48])
+        addresses = np.array([0, 8, 16, 26])
         intervals.append_addresses(addresses)
+
+        # [ (0, 20), (22, 30) ]
         self.assertEqual(len(intervals), 2)
 
         intervals = iter(sorted(intervals))
         interval = next(intervals)
         self.assertEqual(interval.begin, 0)
-        self.assertEqual(interval.end, 38)
+        self.assertEqual(interval.end, 20)
 
         interval = next(intervals)
-        self.assertEqual(interval.begin, 40)
-        self.assertEqual(interval.end, 56)
+        self.assertEqual(interval.begin, 22)
+        self.assertEqual(interval.end, 30)
 
 
 if __name__ == "__main__":

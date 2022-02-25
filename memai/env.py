@@ -8,7 +8,8 @@ from memai import (
 )
 from gym import Env, spaces
 import numpy as np
-from intervaltree import IntervalTree
+import tqdm
+from intervaltree import IntervalTree, Interval
 
 
 class TraceEnv(Env):
@@ -29,6 +30,7 @@ class TraceEnv(Env):
         self._traces = trace_set
         self._interval_distance = interval_distance
         self._page_size = page_size
+        self._progress_bar = tqdm.tqdm()
         self._reset()
 
     def _reset(self):
@@ -44,10 +46,12 @@ class TraceEnv(Env):
         self._interval_observations = iter([])
         self._estimation = None
         self._interval = None
+        self._progress_bar.reset(total=int(self._traces.time_end()))
 
     def _next_window(self):
         window = next(self._windows)
 
+        self._progress_bar.update(int(window.timespan_ddr()))
         # Iterate empty windows.
         while window.is_empty():
             self._previous_window_empty = True
@@ -72,16 +76,25 @@ class TraceEnv(Env):
         # For each mmapped interval build an observation
         observations = []
         for interval in self._mmap_intervals:
+            i_begin = interval.begin >> self._mmap_intervals._page_shift
+            i_end = interval.end >> self._mmap_intervals._page_shift
+            _interval = Interval(i_begin, i_end)
+
             addr = window.trace_ddr.virtual_addresses()
             addr = addr & self._mmap_intervals._page_mask
-            addr = np.array([x if x in interval else -1 for x in addr], dtype=np.int64)
             addr = addr >> self._mmap_intervals._page_shift
-            addr = addr - np.nanmin(addr)
-            print(max(addr))
-            print(interval.end - interval.begin)
+            addr = np.array([x if x in _interval else -1 for x in addr], dtype=np.int64)
+            try:
+                min_addr = np.nanmin([x for x in addr if x >= 0])
+                addr = addr - min_addr
+                print("addr: [{}, {}]".format(min(addr), max(addr)))
+                print("interval: [{}, {}]".format(i_begin, i_end))
+                observation = self.observation_space.from_addresses(addr)
+                observations.append(observation)
+            except ValueError:
+                # If no address is greater there is no address in this interval.
+                continue
 
-            observation = self.observation_space.from_addresses(addr)
-            observations.append(observation)
         self._interval_observations = zip(self._mmap_intervals, observations)
 
     def step(self, action):
@@ -105,7 +118,7 @@ class TraceEnv(Env):
         except StopIteration:
             try:
                 self._next_window()
-                return step(action)
+                return self.step(action)
             except StopIteration:
                 # The reward is negative for the total elapsed time
                 # (we want to minimize elapsed time).
@@ -177,7 +190,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--page-size",
         metavar="<int>",
-        default=13,
+        default=1 << 14,
         type=int,
         help="The size of a page in number of bits.",
     )

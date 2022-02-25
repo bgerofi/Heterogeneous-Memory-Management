@@ -51,7 +51,7 @@ class WindowObservationSpace(Space):
         ndarray = np.zeros((len(vaddr), np.nanmax(vaddr)), dtype=self.dtype)
         # Set samples with a default value.
         for i, addr in enumerate(vaddr):
-            if addr is not np.nan:
+            if addr >= 0:
                 ndarray[i, addr] = 1.0
         # Scale the ndarray to fit this observation shape.
         return self.from_ndarray(ndarray)
