@@ -103,15 +103,18 @@ class TraceEnv(Env):
         # For each mmapped interval build an observation
         observations = []
         for interval in self._mmap_intervals:
-            i_begin = interval.begin >> self.page_shift
-            i_end = interval.end >> self.page_shift
-            _interval = Interval(i_begin, i_end)
             addr = window.trace_ddr.virtual_addresses()
             addr = addr & self.page_mask
             addr = addr >> self.page_shift
+            _interval = Interval(
+                interval.begin >> self.page_shift, interval.end >> self.page_shift
+            )
             addr = np.array([x if x in _interval else -1 for x in addr], dtype=np.int64)
             try:
                 min_addr = np.nanmin([x for x in addr if x >= 0])
+                interval = Interval(
+                    min_addr << self.page_shift, np.nanmax(addr) << self.page_shift
+                )
                 addr = addr - min_addr
                 observation = self.observation_space.from_addresses(addr)
                 observations.append((interval, observation))
