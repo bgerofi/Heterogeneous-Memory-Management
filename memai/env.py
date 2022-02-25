@@ -144,6 +144,9 @@ class TraceEnv(Env):
             stop = False
 
         except StopIteration:
+            self._progress_bar.reset(total=int(self._traces.time_end()))
+            self._progress_bar.update(int(self._traces.time_end()))
+            self._progress_bar.clear()
             # The reward is negative for the total elapsed time
             # (we want to minimize elapsed time).
             reward = -1.0 * self.estimated_time
