@@ -113,8 +113,6 @@ class TraceEnv(Env):
             try:
                 min_addr = np.nanmin([x for x in addr if x >= 0])
                 addr = addr - min_addr
-                print("addr: [{}, {}]".format(min(addr), max(addr)))
-                print("interval: [{}, {}]".format(i_begin, i_end))
                 observation = self.observation_space.from_addresses(addr)
                 observations.append((interval, observation))
             except ValueError:

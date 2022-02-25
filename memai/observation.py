@@ -48,7 +48,7 @@ class WindowObservationSpace(Space):
 
     def from_addresses(self, vaddr):
         # Create the array of observations with no observed sample
-        ndarray = np.zeros((len(vaddr), np.nanmax(vaddr)), dtype=self.dtype)
+        ndarray = np.zeros((len(vaddr), 1 + np.nanmax(vaddr)), dtype=self.dtype)
         # Set samples with a default value.
         for i, addr in enumerate(vaddr):
             if addr >= 0:
