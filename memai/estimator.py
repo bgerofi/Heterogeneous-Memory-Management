@@ -1,43 +1,6 @@
 # /usr/bin/python
 import numpy as np
-
-
-class EstimatorWindowsIter:
-    def __init__(self, application_traces, page_mask):
-        self.window_iter = iter(application_traces)
-        self.page_mask = page_mask
-        self.previous_iter_empty = False
-        self.empty_iter_start = -1
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        window = next(self.window_iter)
-        empty_time = 0.0
-        fast_time = 0.0
-        ddr_time = 0.0
-        hbm_time = 0.0
-        pages = []  # A list of tuples (addr, num_accesses) for the window.
-
-        if window.is_empty():
-            self.previous_iter_empty = True
-        else:
-            if self.previous_iter_empty:
-                empty_time = float(window.time_start() - self.empty_iter_start)
-            self.previous_iter_empty = False
-            self.empty_iter_start = window.time_end()
-            ddr_time = window.timespan_ddr()
-            hbm_time = window.timespan_hbm()
-            if hbm_time * 1.03 >= ddr_time:
-                fast_time = Estimator.estimate_fast(ddr_time, hbm_time)
-            else:
-                addr, count = np.unique(
-                    window.trace_ddr.virtual_addresses() & self.page_mask,
-                    return_counts=True,
-                )
-                pages = list(zip(addr, count))
-        return window, empty_time, fast_time, ddr_time, hbm_time, pages
+from memai.traces import WindowIterator
 
 
 class Estimator:
@@ -46,40 +9,50 @@ class Estimator:
     intervals mapped into the High Bandwidth Memory (hbm).
     """
 
-    def __init__(self, application_traces, page_size=13, verbose=False):
+    def __init__(
+        self,
+        application_traces,
+        page_size=13,
+        compare_unit="ms",
+        window_length=50,
+        verbose=False,
+    ):
         # Time spent on empty window
-        self._empty_time_ = 0.0
+        self._empty_time = 0.0
         # Time spent on windows where hbm and ddr had about the same time.
-        self._fast_time_ = 0.0
-        # For each non empty window: ddr time.
-        self._ddr_time_ = []
-        # For each non empty window: hbm time.
-        self._hbm_time_ = []
-        # For each non empty window: The count for each page access (page, count).
-        self._pages_ = []
-
+        self._fast_time = 0.0
         self._verbose_ = verbose
 
-        page_mask = Estimator.page_mask(page_size)
-        for _, empty_time, fast_time, ddr_time, hbm_time, pages in EstimatorWindowsIter(
-            application_traces, page_mask
-        ):
-            self._empty_time_ += empty_time
-            self._fast_time_ += fast_time
-            self._ddr_time_.append(ddr_time)
-            self._hbm_time_.append(hbm_time)
-            self._pages_.append(pages)
+        self._hbm_time = []
+        self._ddr_time = []
+        self._pages = []
 
-    @staticmethod
-    def from_iter(empty_time, fast_time, ddr_time, hbm_time, pages):
-        estimator = Estimator.__new__()
-        estimator._empty_time_ = empty_time
-        estimator._fast_time_ = fast_time
-        estimator._ddr_time_ = [ddr_time]
-        estimator._hbm_time_ = [hbm_time]
-        estimator._pages_ = [pages]
-        estimator._verbose_ = False
-        return estimator
+        page_mask = Estimator.page_mask(page_size)
+        window_iter = WindowIterator(application_traces, compare_unit, window_length)
+        previous_iter_empty = False
+        empty_iter_start = -1
+
+        for window in window_iter:
+            if window.is_empty():
+                previous_iter_empty = True
+            else:
+                if previous_iter_empty:
+                    self._empty_time += float(window.time_start() - empty_iter_start)
+                previous_iter_empty = False
+                empty_iter_start = window.time_end()
+                ddr_time = window.timespan_ddr()
+                hbm_time = window.timespan_hbm()
+                if hbm_time * 1.03 >= ddr_time:
+                    self._fast_time += Estimator.estimate_fast(ddr_time, hbm_time)
+                else:
+                    addr, count = np.unique(
+                        window.trace_ddr.virtual_addresses() & page_mask,
+                        return_counts=True,
+                    )
+                    pages = list(zip(addr, count))
+                    self._ddr_time.append(ddr_time)
+                    self._hbm_time.append(hbm_time)
+                    self._pages.append(pages)
 
     @staticmethod
     def page_mask(page_size):
@@ -91,8 +64,8 @@ class Estimator:
             "\t{:.2f} (s) on empty windows\n"
             "\t{:.2f} (s) on similar windows\n"
             "\t{:.2f} (s) on estimated windows\n".format(
-                self._empty_time_ / 1000.0,
-                self._fast_time_ / 1000.0,
+                self._empty_time / 1000.0,
+                self._fast_time / 1000.0,
                 estimated_time / 1000.0,
             )
         )
@@ -106,16 +79,14 @@ class Estimator:
         """
         estimated_time = 0.0
 
-        for (t_ddr, t_hbm, pages) in zip(
-            self._ddr_time_, self._hbm_time_, self._pages_
-        ):
+        for (t_ddr, t_hbm, pages) in zip(self._ddr_time, self._hbm_time, self._pages):
             estimated_time += self._estimate_accurate_(
                 pages, hbm_intervals, hbm_factor, t_ddr, t_hbm
             )
 
         if self._verbose_:
             self.print_estimate_info(estimated_time)
-        return estimated_time + self._empty_time_ + self._fast_time_
+        return estimated_time + self._empty_time + self._fast_time
 
     @staticmethod
     def estimate_fast(t_ddr, t_hbm):
@@ -320,9 +291,6 @@ if __name__ == "__main__":
     traces = TraceSet(
         ddr_trace,
         hbm_trace,
-        args.window_len,
-        args.compare_unit,
-        args.verbose,
     )
     # Filter phases if needed.
     if args.filter_phases is not None:
@@ -344,7 +312,9 @@ if __name__ == "__main__":
         raise ValueError("No HBM intervals provided.")
 
     # Compute estimation for the traces and hbm_intervals.
-    estimator = Estimator(traces, page_size=args.page_size, verbose=args.verbose)
+    estimator = Estimator(
+        traces, args.page_size, args.compare_unit, args.window_len, args.verbose
+    )
     runtime, estimated_time = time_estimation(estimator, hbm_intervals, args.hbm_factor)
     hbm_time = hbm_trace.timespan()
     ddr_time = ddr_trace.timespan()
@@ -353,6 +323,7 @@ if __name__ == "__main__":
         if args.measured_input is not None
         else 0
     )
+
     error = float(abs(estimated_time - measured_time)) / float(abs(ddr_time - hbm_time))
     print("Time DDR: {:.2f} (s)".format(ddr_time / 1000.0))
     print("Time HBM: {:.2f} (s)".format(hbm_time / 1000.0))

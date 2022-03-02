@@ -1,3 +1,4 @@
+
 from memai import (
     Estimator,
     IntervalDetector,
@@ -191,6 +192,7 @@ class TraceEnv(Env):
 if __name__ == "__main__":
     import argparse
     import time
+    import tracemalloc
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -276,8 +278,17 @@ if __name__ == "__main__":
         type=int,
         help="The cost of moving a page in milliseconds.",
     )
+    parser.add_argument(
+        "--tracemalloc",
+        default=False,
+        action="store_true",
+        help="Trace and print peak memory usage. This slows down execution.",
+    )
 
     args = parser.parse_args()
+
+    if args.tracemalloc:
+        tracemalloc.start()
 
     ddr_trace = Trace(args.ddr_input, args.cpu_cycles_per_ms)
     hbm_trace = Trace(args.hbm_input, args.cpu_cycles_per_ms)
@@ -309,6 +320,10 @@ if __name__ == "__main__":
         observation, reward, stop, debug_info = env.step(action_space.sample())
     simulation_time = time.time() - t
 
+    if args.tracemalloc:
+        size, peak_size = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+
     hbm_time = hbm_trace.timespan()
     ddr_time = ddr_trace.timespan()
     simulated_time = env._estimated_time + env._move_pages_time
@@ -319,3 +334,5 @@ if __name__ == "__main__":
     print("\tEstimated Time: {:.2f} (s)".format(env._estimated_time / 1000.0))
     print("\tMove Pages Time: {:.2f} (s)".format(env._move_pages_time / 1000.0))
     print("Simulation Time: {:.2f} (s)".format(simulation_time))
+    if args.tracemalloc:
+        print("Peak Memory Usage: {:.2f} (MB)".format(peak_size / 1e6))
