@@ -29,24 +29,25 @@ class Estimator:
         page_mask = Estimator.page_mask(page_size)
         window_iter = WindowIterator(application_traces, compare_unit, window_length)
 
-        for window, ddr_time, hbm_time, empty_time in window_iter:
+        for window in window_iter:
             if verbose:
-                print(str(window))
+                print(window)
 
-            self._empty_time += empty_time
-            if ddr_time == 0:
+            if window.is_empty():
+                self._empty_time += window.t_ddr
                 continue
+
             if False:  # hbm_time * 1.03 >= ddr_time:
-                fast_time = Estimator.estimate_fast(ddr_time, hbm_time)
+                fast_time = Estimator.estimate_fast(window.t_ddr, window.t_hbm)
                 self._fast_time += fast_time
             else:
                 addr, count = np.unique(
-                    window.trace_ddr.virtual_addresses() & page_mask,
+                    window.addresses & page_mask,
                     return_counts=True,
                 )
                 pages = list(zip(addr, count))
-                self._ddr_time.append(ddr_time)
-                self._hbm_time.append(hbm_time)
+                self._ddr_time.append(window.t_ddr)
+                self._hbm_time.append(window.t_hbm)
                 self._pages.append(pages)
 
         self._cumulated_ddr_time = (
