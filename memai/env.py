@@ -1,8 +1,8 @@
-
 from memai import (
     Estimator,
     IntervalDetector,
     TraceSet,
+    WindowIterator,
     Trace,
     WindowObservationSpace,
     MovePagesActionSpace,
@@ -19,6 +19,8 @@ class TraceEnv(Env):
         trace_set,
         page_size=1 << 14,
         interval_distance=1 << 22,
+        window_len=1000,
+        compare_unit="ms",
         observation_space=WindowObservationSpace(128, 128),
         action_space=MovePagesActionSpace(
             num_actions=128, move_page_cost=10, page_size=1 << 14
@@ -28,6 +30,8 @@ class TraceEnv(Env):
         self.observation_space = observation_space
         self.action_space = action_space
 
+        self.window_len = window_len
+        self.compare_unit = compare_unit
         self._traces = trace_set
         self._progress_bar = tqdm.tqdm()
         self._reset(page_size, interval_distance)
@@ -41,7 +45,9 @@ class TraceEnv(Env):
         self._previous_window_empty = False
         self._empty_window_start = 0
         self._progress_bar.reset(total=int(self._traces.time_end()))
-        self._windows = iter(self._traces)
+        self._windows = iter(
+            WindowIterator(self._traces, self.compare_unit, self.window_len)
+        )
         self._interval_observations = iter([])
         self.previous_interval = None
 
@@ -79,18 +85,10 @@ class TraceEnv(Env):
             return self.next_observation()
 
     def next_window(self):
-        window = next(self._windows)
-
-        # Iterate empty windows.
-        while window.is_empty():
-            self._previous_window_empty = True
-            window = next(self._windows)
+        window, t_ddr, t_hbm, t_empty = next(self._windows)
 
         # Increment time spent on empty windows.
-        if self._previous_window_empty == True:
-            self._estimated_time += window.time_start() - self._empty_window_start
-        self._previous_window_empty = False
-        self._empty_window_start = window.time_end()
+        self._estimated_time += t_empty
 
         # Update mmap_intervals
         self._mmap_intervals.append_addresses(window.trace_ddr.virtual_addresses())
@@ -98,7 +96,10 @@ class TraceEnv(Env):
 
         # Compute time estimation for the window
         self._estimated_time += Estimator(
-            window, self._mmap_intervals.page_shift
+            window,
+            self._mmap_intervals.page_shift,
+            self.compare_unit,
+            self.window_len,
         ).estimate(self._hbm_intervals)
 
         # For each mmapped interval build an observation
@@ -295,8 +296,6 @@ if __name__ == "__main__":
     traces = TraceSet(
         ddr_trace,
         hbm_trace,
-        args.window_len,
-        args.compare_unit,
     )
 
     observation_space = WindowObservationSpace(

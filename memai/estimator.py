@@ -22,37 +22,39 @@ class Estimator:
         # Time spent on windows where hbm and ddr had about the same time.
         self._fast_time = 0.0
         self._verbose_ = verbose
-
         self._hbm_time = []
         self._ddr_time = []
         self._pages = []
 
         page_mask = Estimator.page_mask(page_size)
         window_iter = WindowIterator(application_traces, compare_unit, window_length)
-        previous_iter_empty = False
-        empty_iter_start = -1
 
-        for window in window_iter:
-            if window.is_empty():
-                previous_iter_empty = True
+        for window, ddr_time, hbm_time, empty_time in window_iter:
+            if verbose:
+                print(str(window))
+
+            self._empty_time += empty_time
+            if ddr_time == 0:
+                continue
+            if False:  # hbm_time * 1.03 >= ddr_time:
+                fast_time = Estimator.estimate_fast(ddr_time, hbm_time)
+                self._fast_time += fast_time
             else:
-                if previous_iter_empty:
-                    self._empty_time += float(window.time_start() - empty_iter_start)
-                previous_iter_empty = False
-                empty_iter_start = window.time_end()
-                ddr_time = window.timespan_ddr()
-                hbm_time = window.timespan_hbm()
-                if hbm_time * 1.03 >= ddr_time:
-                    self._fast_time += Estimator.estimate_fast(ddr_time, hbm_time)
-                else:
-                    addr, count = np.unique(
-                        window.trace_ddr.virtual_addresses() & page_mask,
-                        return_counts=True,
-                    )
-                    pages = list(zip(addr, count))
-                    self._ddr_time.append(ddr_time)
-                    self._hbm_time.append(hbm_time)
-                    self._pages.append(pages)
+                addr, count = np.unique(
+                    window.trace_ddr.virtual_addresses() & page_mask,
+                    return_counts=True,
+                )
+                pages = list(zip(addr, count))
+                self._ddr_time.append(ddr_time)
+                self._hbm_time.append(hbm_time)
+                self._pages.append(pages)
+
+        self._cumulated_ddr_time = (
+            sum(self._ddr_time) + self._fast_time + self._empty_time
+        )
+        self._cumulated_hbm_time = (
+            sum(self._hbm_time) + self._fast_time + self._empty_time
+        )
 
     @staticmethod
     def page_mask(page_size):
@@ -103,6 +105,10 @@ class Estimator:
                 hbm_accesses += n
             else:
                 ddr_accesses += n
+
+        # total_accesses = ddr_accesses + hbm_accesses
+        # return (t_ddr * ddr_accesses + t_hbm * hbm_accesses) / total_accesses
+
         weighted_hbm_accesses = float(hbm_accesses) * hbm_factor
         hbm_saved_time = t_ddr - t_hbm
         hbm_saving_factor = float(weighted_hbm_accesses) / float(
@@ -330,6 +336,16 @@ if __name__ == "__main__":
     if args.measured_input is not None:
         print("Time Measured: {:.2f} (s)".format(measured_time / 1000.0))
     print("Time Estimated: {:.2f} (s)".format(estimated_time / 1000.0))
+    print(
+        "Cumulated DDR Windows Time: {:.2f} (s)".format(
+            estimator._cumulated_ddr_time / 1000.0
+        )
+    )
+    print(
+        "Cumulated HBM Windows Time: {:.2f} (s)".format(
+            estimator._cumulated_hbm_time / 1000.0
+        )
+    )
     if args.measured_input is not None:
         print("Estimation Relative Error: {:.2f}%".format(100.0 * error))
     print("Estimator Runtime: {:.8f} (s)".format(runtime))
