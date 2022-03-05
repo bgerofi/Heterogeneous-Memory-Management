@@ -85,29 +85,26 @@ class TraceEnv(Env):
             return self.next_observation()
 
     def next_window(self):
-        window, t_ddr, t_hbm, t_empty = next(self._windows)
-
-        # Increment time spent on empty windows.
-        self._estimated_time += t_empty
+        while True:
+            window = next(self._windows)
+            if window.is_empty():
+                # Increment time spent on empty windows.
+                self._estimated_time += window.t_ddr
+            else:
+                break
 
         # Update mmap_intervals
-        self._mmap_intervals.append_addresses(window.trace_ddr.virtual_addresses())
-        self._mmap_intervals.append_addresses(window.trace_hbm.virtual_addresses())
+        self._mmap_intervals.append_addresses(window.addresses)
 
         # Compute time estimation for the window
-        self._estimated_time += Estimator(
-            window,
-            self._mmap_intervals.page_shift,
-            self.compare_unit,
-            self.window_len,
-        ).estimate(self._hbm_intervals)
+        self._estimated_time += Estimator.estimate_window(
+            window, self._mmap_intervals.page_mask, self._hbm_intervals
+        )
 
         # For each mmapped interval build an observation
         observations = []
         for interval in self._mmap_intervals:
-            addr = window.trace_ddr.virtual_addresses()
-            addr = addr & self.page_mask
-            addr = addr >> self.page_shift
+            addr = window.addresses >> self.page_shift
             _interval = Interval(
                 interval.begin >> self.page_shift, interval.end >> self.page_shift
             )
@@ -125,7 +122,7 @@ class TraceEnv(Env):
                 continue
 
         self._interval_observations = iter(observations)
-        self._progress_bar.update(int(window.timespan_ddr()))
+        self._progress_bar.update(int(window.t_ddr))
 
     def step(self, action):
         try:

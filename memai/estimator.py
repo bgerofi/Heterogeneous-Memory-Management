@@ -73,6 +73,24 @@ class Estimator:
             )
         )
 
+    def estimate_window(window, page_mask, hbm_intervals, hbm_factor=1.0):
+        if window.is_empty():
+            return window.t_ddr
+        if window.t_ddr < (1.03 * window.t_hbm):
+            return Estimator.estimate_fast(window.t_ddr, window.t_hbm)
+        else:
+            addr, count = np.unique(
+                window.addresses & page_mask,
+                return_counts=True,
+            )
+            return Estimator.estimate_accurate(
+                list(zip(addr, count)),
+                window.t_ddr,
+                window.t_hbm,
+                hbm_intervals,
+                hbm_factor,
+            )
+
     def estimate(self, hbm_intervals, hbm_factor=1.0):
         """
         Estimate execution time of the estimator traces with a specific mapping
@@ -83,8 +101,12 @@ class Estimator:
         estimated_time = 0.0
 
         for (t_ddr, t_hbm, pages) in zip(self._ddr_time, self._hbm_time, self._pages):
-            estimated_time += self._estimate_accurate_(
-                pages, hbm_intervals, hbm_factor, t_ddr, t_hbm
+            estimated_time += Estimator.estimate_accurate(
+                pages,
+                t_ddr,
+                t_hbm,
+                hbm_intervals,
+                hbm_factor,
             )
 
         if self._verbose_:
@@ -95,7 +117,8 @@ class Estimator:
     def estimate_fast(t_ddr, t_hbm):
         return (t_ddr + t_hbm) / 2.0
 
-    def _estimate_accurate_(self, pages, hbm_intervals, hbm_factor, t_ddr, t_hbm):
+    @staticmethod
+    def estimate_accurate(pages, t_ddr, t_hbm, hbm_intervals, hbm_factor):
         if len(pages) == 0:
             return 0.0
 
