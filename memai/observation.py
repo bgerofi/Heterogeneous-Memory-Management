@@ -16,6 +16,9 @@ class WindowObservationSpace(Space):
         shape = [nrows, ncols]
         super().__init__(shape, np.float64, seed)
 
+    def empty(self):
+        return np.zeros(self.shape, dtype=self.dtype)
+
     def from_ndarray(self, ndarray):
         if len(ndarray.shape) != 2:
             raise ValueError(

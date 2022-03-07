@@ -238,11 +238,11 @@ class WindowItem:
         self.t_hbm_end = t_hbm_end
 
     def __str__(self):
-        s = "DDR: [{:8g} - {:8g}](ms)".format(
+        s = "DDR: [{:8g} - {:8g}]".format(
             self.t_ddr_begin,
             self.t_ddr_end,
         )
-        s += " -- HBM: [{:8g} - {:8g}](ms)".format(
+        s += " -- HBM: [{:8g} - {:8g}]".format(
             self.t_hbm_begin,
             self.t_hbm_end,
         )
@@ -303,8 +303,7 @@ class WindowIterator:
     def subset_window(self, df, begin, end):
         timestamps = self._timestamp_fn_(df)
         begin = np.searchsorted(timestamps, begin, side="left")
-        if end != -1:
-            end = np.searchsorted(timestamps, end, side="right")
+        end = np.searchsorted(timestamps, end, side="right")
         return df[begin:end]
 
     def next_phase(self):
@@ -318,10 +317,12 @@ class WindowIterator:
             if len(trace_ddr) > 0:
                 break
 
-        ddr_s, ddr_e = self._bounds_fn_(trace_ddr)
+        ddr_s = self._last_timestamp_ddr
+        hbm_s = self._last_timestamp_hbm
+        _, ddr_e = self._bounds_fn_(trace_ddr)
         t_ddr = ddr_e - ddr_s
         try:
-            hbm_s, hbm_e = self._bounds_fn_(trace_hbm)
+            _, hbm_e = self._bounds_fn_(trace_hbm)
             t_hbm = hbm_e - hbm_s
         except IndexError:
             t_hbm = 0
