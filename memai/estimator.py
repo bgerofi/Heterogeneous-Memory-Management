@@ -134,15 +134,10 @@ class Estimator:
             else:
                 ddr_accesses += n
 
-        # total_accesses = ddr_accesses + hbm_accesses
-        # return (t_ddr * ddr_accesses + t_hbm * hbm_accesses) / total_accesses
-
-        weighted_hbm_accesses = float(hbm_accesses) * hbm_factor
-        hbm_saved_time = t_ddr - t_hbm
-        hbm_saving_factor = float(weighted_hbm_accesses) / float(
-            ddr_accesses + weighted_hbm_accesses
-        )
-        return t_ddr - (hbm_saved_time * hbm_saving_factor)
+        total_accesses = ddr_accesses + hbm_accesses
+        return (
+            t_ddr * ddr_accesses + t_hbm * hbm_accesses / hbm_factor
+        ) / total_accesses
 
 
 if __name__ == "__main__":
