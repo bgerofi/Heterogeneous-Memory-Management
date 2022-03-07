@@ -1,6 +1,5 @@
 import pandas as pd
 import numpy as np
-from memai.utils import IterQueue
 
 
 class Trace:
@@ -19,13 +18,11 @@ class Trace:
         data["Timestamp"] = data["Timestamp"].div(cpu_cycles_per_ms)
         if "Phase" not in data.columns:
             data = data.assign(Phase=0)
-        else:
-            # Make instructions as an increasing number.
-            for phase in range(1, data["Phase"].iloc[-1]):
-                i = np.searchsorted(data["Phase"], phase)
-                if i == 0:
-                    continue
-                data.loc[i:, "Instrs"] += data["Instrs"][i - 1]
+
+        # Make instructions as an increasing number.
+        data = data.assign(
+            Instrs=np.cumsum(data.Instrs.values), Index=list(range(len(data)))
+        )
 
         self._data_ = data
         self.filename = filename
@@ -75,13 +72,10 @@ class Trace:
 
     @staticmethod
     def access_range(dataframe):
-        return 0, len(dataframe)
+        return dataframe["Index"].iloc[0], dataframe["Index"].iloc[-1]
 
     def __len__(self):
         return self._data_.__len__()
-
-    def timestamps(self):
-        return self._data_["Timestamp"].values
 
     def virtual_addresses(self):
         """
@@ -192,11 +186,19 @@ class Trace:
         forming a window based on the number of samples in the pandas data
         frame"
         """
-        win_begin = int(window_len * win)
+        win_begin = np.searchsorted(
+            self._data_["Index"],
+            self._data_["Index"].iloc[0] + (window_len * win),
+            side="left",
+        )
         if win == nr_wins - 1:
             win_end = len(self._data_)
         else:
-            win_end = int(window_len * (win + 1))
+            win_end = np.searchsorted(
+                self._data_["Index"],
+                self._data_["Index"].iloc[0] + (window_len * (win + 1)),
+                side="right",
+            )
         return self._data_[win_begin:win_end]
 
     def __getitem__(self, item):
@@ -261,23 +263,8 @@ class TraceSet:
         """
         return min(len(self.trace_ddr), len(self.trace_hbm)) == 0
 
-    def time_start(self):
-        return self.trace_ddr["Timestamp"].iloc[0]
-
     def time_end(self):
         return self.trace_ddr["Timestamp"].iloc[-1]
-
-    def timespan_ddr(self):
-        """
-        Get the total time in the ddr trace.
-        """
-        return self.trace_ddr.timespan()
-
-    def timespan_hbm(self):
-        """
-        Get the total time in the hbm trace.
-        """
-        return self.trace_hbm.timespan()
 
     def subset_phases(self, phases):
         """
@@ -338,13 +325,10 @@ class WindowIterator:
     inside phases of the trace. On each iteration, the next window is returned.
     """
 
-    def __init__(self, trace_set, compare_unit="ms", window_length=50):
+    def __init__(self, trace_set, compare_unit="ms", window_length=None):
         self._traces = trace_set
         self._phases = iter(trace_set.trace_ddr.phases())
         self._windows = iter([])
-        self._target_win_len = float(window_length)
-        self._last_timestamp_ddr = 0
-        self._last_timestamp_hbm = 0
 
         if compare_unit == "accesses":
             self._bounds_fn_ = Trace.access_range
@@ -355,6 +339,20 @@ class WindowIterator:
         elif compare_unit == "ms":
             self._bounds_fn_ = Trace.time_range
             self._subset_window_fn_ = Trace.subset_window_timestamp
+
+        ts_ddr, te_ddr = Trace.time_range(trace_set.trace_ddr)
+        ts_hbm, te_hbm = Trace.time_range(trace_set.trace_hbm)
+        self._last_timestamp_ddr = ts_ddr
+        self._last_timestamp_hbm = ts_hbm
+
+        if window_length is None:
+            ts, te = self._bounds_fn_(trace_set.trace_ddr)
+            num_phases = len(trace_set.trace_ddr.phases())
+            window_length = (te - ts) / num_phases
+            window_length = window_length / 100
+            window_length = max(1, window_length)
+            widow_length = min(te - ts, window_length)
+        self._target_win_len = float(window_length)
 
     def next_phase(self):
         """
@@ -405,9 +403,9 @@ class WindowIterator:
             t_ddr_end = ddr_s + i * win_len_ddr + win_len_ddr
 
             if len(hbm_win) > 0:
-                _, t_hbm_end = self._bounds_fn_(hbm_win)
+                _, t_hbm_end = Trace.time_range(hbm_win)
             if len(ddr_win) > 0:
-                _, t_ddr_end = self._bounds_fn_(ddr_win)
+                _, t_ddr_end = Trace.time_range(ddr_win)
                 addresses = ddr_win["Vaddr"].values
 
             self._last_timestamp_hbm = t_hbm_end
