@@ -137,69 +137,14 @@ class Trace:
         else:
             return self._subset_([p in phase for p in self._data_.Phase])
 
-    def subset_window_timestamp(self, window_len, win, nr_wins):
-        """
-        Build a trace from this trace with a subset of this trace element
-        forming a window based on the "Timestamp" column of the pandas data
-        frame"
-        """
-        win_begin = np.searchsorted(
-            self._data_["Timestamp"],
-            self._data_["Timestamp"].iloc[0] + (window_len * win),
-            side="left",
-        )
-        if win == nr_wins - 1:
-            win_end = len(self._data_)
-        else:
-            win_end = np.searchsorted(
-                self._data_["Timestamp"],
-                self._data_["Timestamp"].iloc[0] + (window_len * (win + 1)),
-                side="right",
-            )
+    def timestamps_data(self):
+        return self._data_.Timestamp
 
-        return self._data_[win_begin:win_end]
+    def instructions_data(self):
+        return self._data_.Instrs
 
-    def subset_window_instruction(self, window_len, win, nr_wins):
-        """
-        Build a trace from this trace with a subset of this trace element
-        forming a window based on the "Instrs" column of the pandas data
-        frame"
-        """
-        win_begin = np.searchsorted(
-            self._data_["Instrs"],
-            self._data_["Instrs"].iloc[0] + (window_len * win),
-            side="left",
-        )
-        if win == nr_wins - 1:
-            win_end = len(self._data_)
-        else:
-            win_end = np.searchsorted(
-                self._data_["Instrs"],
-                self._data_["Instrs"].iloc[0] + (window_len * (win + 1)),
-                side="right",
-            )
-        return self._data_[win_begin:win_end]
-
-    def subset_window_access(self, window_len, win, nr_wins):
-        """
-        Build a trace from this trace with a subset of this trace element
-        forming a window based on the number of samples in the pandas data
-        frame"
-        """
-        win_begin = np.searchsorted(
-            self._data_["Index"],
-            self._data_["Index"].iloc[0] + (window_len * win),
-            side="left",
-        )
-        if win == nr_wins - 1:
-            win_end = len(self._data_)
-        else:
-            win_end = np.searchsorted(
-                self._data_["Index"],
-                self._data_["Index"].iloc[0] + (window_len * (win + 1)),
-                side="right",
-            )
-        return self._data_[win_begin:win_end]
+    def accesses_data(self):
+        return self._data_.Index
 
     def __getitem__(self, item):
         return self._data_.__getitem__(item)
@@ -329,30 +274,38 @@ class WindowIterator:
         self._traces = trace_set
         self._phases = iter(trace_set.trace_ddr.phases())
         self._windows = iter([])
-
-        if compare_unit == "accesses":
-            self._bounds_fn_ = Trace.access_range
-            self._subset_window_fn_ = Trace.subset_window_access
-        elif compare_unit == "instrs":
-            self._bounds_fn_ = Trace.instruction_range
-            self._subset_window_fn_ = Trace.subset_window_instruction
-        elif compare_unit == "ms":
-            self._bounds_fn_ = Trace.time_range
-            self._subset_window_fn_ = Trace.subset_window_timestamp
-
-        ts_ddr, te_ddr = Trace.time_range(trace_set.trace_ddr)
-        ts_hbm, te_hbm = Trace.time_range(trace_set.trace_hbm)
-        self._last_timestamp_ddr = ts_ddr
-        self._last_timestamp_hbm = ts_hbm
+        self._bounds_fn_, self._timestamp_fn_ = WindowIterator._parse_unit(compare_unit)
+        self._last_timestamp_ddr, te = self._bounds_fn_(trace_set.trace_ddr)
+        self._last_timestamp_hbm, _ = self._bounds_fn_(trace_set.trace_hbm)
 
         if window_length is None:
-            ts, te = self._bounds_fn_(trace_set.trace_ddr)
             num_phases = len(trace_set.trace_ddr.phases())
-            window_length = (te - ts) / num_phases
-            window_length = window_length / 100
+            window_length = (te - self._last_timestamp_ddr) / num_phases
+            window_length = window_length
             window_length = max(1, window_length)
-            widow_length = min(te - ts, window_length)
+            widow_length = min(te - self._last_timestamp_ddr, window_length)
         self._target_win_len = float(window_length)
+
+    @staticmethod
+    def _parse_unit(unit):
+        if unit == "accesses":
+            return Trace.access_range, Trace.accesses_data
+        elif unit == "instrs":
+            return Trace.instruction_range, Trace.instructions_data
+        elif unit == "ms":
+            return Trace.time_range, Trace.timestamps_data
+        else:
+            raise ValueError(
+                "Invalid unit: {}. Must be one of: 'ms', 'instrs', 'accesses'.",
+                format(unit),
+            )
+
+    def subset_window(self, df, begin, end):
+        timestamps = self._timestamp_fn_(df)
+        begin = np.searchsorted(timestamps, begin, side="left")
+        if end != -1:
+            end = np.searchsorted(timestamps, end, side="right")
+        return df[begin:end]
 
     def next_phase(self):
         """
@@ -381,35 +334,31 @@ class WindowIterator:
             nr_win = int(t_ddr / self._target_win_len)
             win_len_ddr = t_ddr / nr_win
             win_len_hbm = t_hbm / nr_win
+        win_len_ddr = max(1, win_len_ddr)
 
         windows = []
-        for i in range(nr_win):
-            hbm_win = self._subset_window_fn_(
-                trace_hbm,
-                win_len_hbm,
-                i,
-                nr_win,
-            )
-            ddr_win = self._subset_window_fn_(
-                trace_ddr,
-                win_len_ddr,
-                i,
-                nr_win,
-            )
+        while self._last_timestamp_ddr < ddr_e:
             t_hbm_begin = self._last_timestamp_hbm
             t_ddr_begin = self._last_timestamp_ddr
+            t_hbm_end = self._last_timestamp_hbm + win_len_hbm
+            t_ddr_end = self._last_timestamp_ddr + win_len_ddr
+            hbm_win = self.subset_window(trace_hbm, t_hbm_begin, t_hbm_end)
+            ddr_win = self.subset_window(trace_ddr, t_ddr_begin, t_ddr_end)
             addresses = []
-            t_hbm_end = hbm_s + i * win_len_hbm + win_len_hbm
-            t_ddr_end = ddr_s + i * win_len_ddr + win_len_ddr
 
             if len(hbm_win) > 0:
-                _, t_hbm_end = Trace.time_range(hbm_win)
+                _, t_end = self._bounds_fn_(hbm_win)
+                t_hbm_end = max(t_hbm_end, t_end)
+                t_hbm_end = min(t_hbm_end, hbm_e)
             if len(ddr_win) > 0:
-                _, t_ddr_end = Trace.time_range(ddr_win)
+                _, t_end = self._bounds_fn_(ddr_win)
+                t_ddr_end = max(t_ddr_end, t_end)
+                t_ddr_end = min(t_ddr_end, ddr_e)
                 addresses = ddr_win["Vaddr"].values
 
             self._last_timestamp_hbm = t_hbm_end
             self._last_timestamp_ddr = t_ddr_end
+
             windows.append(
                 WindowItem(
                     t_ddr_begin,

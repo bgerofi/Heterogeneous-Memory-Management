@@ -25,6 +25,7 @@ class Estimator:
         self._hbm_time = []
         self._ddr_time = []
         self._pages = []
+        self._unit = compare_unit
 
         page_mask = Estimator.page_mask(page_size)
         window_iter = WindowIterator(application_traces, compare_unit, window_length)
@@ -63,13 +64,16 @@ class Estimator:
 
     def print_estimate_info(self, estimated_time):
         print(
-            "Estimation time breakdown:\n"
-            "\t{:.2f} (s) on empty windows\n"
-            "\t{:.2f} (s) on similar windows\n"
-            "\t{:.2f} (s) on estimated windows\n".format(
-                self._empty_time / 1000.0,
-                self._fast_time / 1000.0,
-                estimated_time / 1000.0,
+            "Estimation breakdown:\n"
+            "\t{:.2f} ({}) on empty windows\n"
+            "\t{:.2f} ({}) on similar windows\n"
+            "\t{:.2f} ({}) on estimated windows\n".format(
+                self._empty_time,
+                self._unit,
+                self._fast_time,
+                self._unit,
+                estimated_time,
+                self._unit,
             )
         )
 
@@ -346,30 +350,24 @@ if __name__ == "__main__":
         traces, args.page_size, args.compare_unit, args.window_len, args.verbose
     )
     runtime, estimated_time = time_estimation(estimator, hbm_intervals, args.hbm_factor)
-    hbm_time = hbm_trace.timespan()
-    ddr_time = ddr_trace.timespan()
-    measured_time = (
-        Trace(args.measured_input, args.cpu_cycles_per_ms, args.verbose).timespan()
-        if args.measured_input is not None
-        else 0
-    )
+    time_range_fn, _ = WindowIterator._parse_unit(args.compare_unit)
+    hbm_time = float(np.diff(list(time_range_fn(hbm_trace))))
+    ddr_time = float(np.diff(list(time_range_fn(ddr_trace))))
+
+    if args.measured_input is not None:
+        measured_trace = Trace(
+            args.measured_input, args.cpu_cycles_per_ms, args.verbose
+        )
+        measured_time = float(np.diff(list(time_range_fn(measured_trace))))
+    else:
+        measured_time = 0
 
     error = float(abs(estimated_time - measured_time)) / float(abs(ddr_time - hbm_time))
-    print("Time DDR: {:.2f} (s)".format(ddr_time / 1000.0))
-    print("Time HBM: {:.2f} (s)".format(hbm_time / 1000.0))
+    print("Time DDR: {:.2f} ({})".format(ddr_time, args.compare_unit))
+    print("Time HBM: {:.2f} ({})".format(hbm_time, args.compare_unit))
     if args.measured_input is not None:
-        print("Time Measured: {:.2f} (s)".format(measured_time / 1000.0))
-    print("Time Estimated: {:.2f} (s)".format(estimated_time / 1000.0))
-    print(
-        "Cumulated DDR Windows Time: {:.2f} (s)".format(
-            estimator._cumulated_ddr_time / 1000.0
-        )
-    )
-    print(
-        "Cumulated HBM Windows Time: {:.2f} (s)".format(
-            estimator._cumulated_hbm_time / 1000.0
-        )
-    )
+        print("Time Measured: {:.2f} ({})".format(measured_time, args.compare_unit))
+    print("Time Estimated: {:.2f} ({})".format(estimated_time, args.compare_unit))
     if args.measured_input is not None:
         print("Estimation Relative Error: {:.2f}%".format(100.0 * error))
     print("Estimator Runtime: {:.8f} (s)".format(runtime))
