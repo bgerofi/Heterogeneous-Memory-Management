@@ -77,20 +77,16 @@ class Estimator:
             )
         )
 
-    def estimate_window(window, page_mask, hbm_intervals, hbm_factor=1.0):
-        if window.is_empty():
-            return window.t_ddr
-        if window.t_ddr < (1.03 * window.t_hbm):
-            return Estimator.estimate_fast(window.t_ddr, window.t_hbm)
+    def estimate_window(page_accesses, t_ddr, t_hbm, hbm_intervals, hbm_factor=1.0):
+        if len(page_accesses) == 0:
+            return t_ddr
+        if t_ddr < (1.03 * t_hbm):
+            return Estimator.estimate_fast(t_ddr, t_hbm)
         else:
-            addr, count = np.unique(
-                window.addresses & page_mask,
-                return_counts=True,
-            )
             return Estimator.estimate_accurate(
-                list(zip(addr, count)),
-                window.t_ddr,
-                window.t_hbm,
+                page_accesses,
+                t_ddr,
+                t_hbm,
                 hbm_intervals,
                 hbm_factor,
             )
