@@ -140,6 +140,7 @@ if __name__ == "__main__":
     import time
     import re
     from memai import Trace, TraceSet
+    from memai.options import *
     from intervaltree import Interval, IntervalTree
     import argparse
 
@@ -218,26 +219,8 @@ if __name__ == "__main__":
         return (t_end - t_start), t_e
 
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--ddr-input",
-        metavar="<file>",
-        required=True,
-        type=str,
-        help=(
-            "Feather format pandas memory access trace input file of "
-            "execution in ddr memory."
-        ),
-    )
-    parser.add_argument(
-        "--hbm-input",
-        metavar="<file>",
-        required=True,
-        type=str,
-        help=(
-            "Feather format pandas memory access trace input file of "
-            "execution in hbm memory."
-        ),
-    )
+    add_traces_input_args(parser)
+    add_window_args(parser)
     parser.add_argument(
         "--measured-input",
         metavar="<file>",
@@ -246,27 +229,6 @@ if __name__ == "__main__":
             "Feather format pandas memory access trace input file of "
             "execution to be compared with estimator."
         ),
-    )
-    parser.add_argument(
-        "--cpu-cycles-per-ms",
-        metavar="<int>",
-        default=1400000,
-        type=int,
-        help="CPU cycles per millisecond (default: 1,400,000 for KNL).",
-    )
-    parser.add_argument(
-        "--window-len",
-        metavar="<int>",
-        default=None,
-        type=int,
-        help="Comparison window length.",
-    )
-    parser.add_argument(
-        "--compare-unit",
-        default="ms",
-        choices=["accesses", "ms", "instrs"],
-        type=str,
-        help="Comparison length unit.",
     )
     parser.add_argument(
         "--hbm-factor",
@@ -299,13 +261,6 @@ if __name__ == "__main__":
         action="store_true",
         help="Mark all the phases in the trace as phase 0. This option is "
         "treated after --filter-phases option.",
-    )
-    parser.add_argument(
-        "--page-size",
-        metavar="<int>",
-        default=13,
-        type=int,
-        help="The size of a page in number of bits.",
     )
     parser.add_argument("--verbose", default=False, action="store_true")
     args = parser.parse_args()

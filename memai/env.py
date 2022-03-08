@@ -191,56 +191,11 @@ if __name__ == "__main__":
     import argparse
     import time
     import tracemalloc
+    from memai.options import *
 
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--ddr-input",
-        metavar="<file>",
-        required=True,
-        type=str,
-        help=(
-            "Feather format pandas memory access trace input file of "
-            "execution in ddr memory."
-        ),
-    )
-    parser.add_argument(
-        "--hbm-input",
-        metavar="<file>",
-        required=True,
-        type=str,
-        help=(
-            "Feather format pandas memory access trace input file of "
-            "execution in hbm memory."
-        ),
-    )
-    parser.add_argument(
-        "--page-size",
-        metavar="<int>",
-        default=1 << 14,
-        type=int,
-        help="The size of a page in number of bits.",
-    )
-    parser.add_argument(
-        "--cpu-cycles-per-ms",
-        metavar="<int>",
-        default=1400000,
-        type=int,
-        help="CPU cycles per millisecond (default: 1,400,000 for KNL).",
-    )
-    parser.add_argument(
-        "--window-len",
-        metavar="<int>",
-        default=None,
-        type=int,
-        help="Comparison window length.",
-    )
-    parser.add_argument(
-        "--compare-unit",
-        default="ms",
-        choices=["accesses", "ms", "instrs"],
-        type=str,
-        help="Comparison length unit.",
-    )
+    add_traces_input_args(parser)
+    add_window_args(parser)
     parser.add_argument(
         "--mmap-distance",
         metavar="<int>",
