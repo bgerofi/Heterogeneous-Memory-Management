@@ -16,6 +16,13 @@ class WindowObservationSpace(Space):
         shape = [nrows, ncols]
         super().__init__(shape, np.float64, seed)
 
+    def __eq__(self, other):
+        if not isinstance(other, WindowObservationSpace):
+            return False
+        if other.shape != self.shape:
+            return False
+        return True
+
     def empty(self):
         return np.zeros(self.shape, dtype=self.dtype)
 
