@@ -11,12 +11,21 @@ class Trace:
     is also to be chosen.
     """
 
+    TIMESTAMP = "Timestamp"
+    INSTRUCTION = "Instrs"
+    INDEX = "Index"
+    ADDRESS = "Vaddr"
+    PHASE = "Phase"
+    ACCESS_UNIT = "accesses"
+    INSTRUCTION_UNIT = "instrs"
+    TIME_UNIT = "ms"
+
     def __init__(self, filename, cpu_cycles_per_ms, verbose=False):
         data = pd.read_feather(filename)
 
         # Make Timestamp as milliseconds
-        data["Timestamp"] = data["Timestamp"].div(cpu_cycles_per_ms)
-        if "Phase" not in data.columns:
+        data[Trace.TIMESTAMP] = data[Trace.TIMESTAMP].div(cpu_cycles_per_ms)
+        if Trace.PHASE not in data.columns:
             data = data.assign(Phase=0)
 
         # Make instructions as an increasing number.
@@ -48,7 +57,10 @@ class Trace:
         """
         try:
             return list(
-                range(self._data_["Phase"].iloc[0], self._data_["Phase"].iloc[-1] + 1)
+                range(
+                    self._data_[Trace.PHASE].iloc[0],
+                    self._data_[Trace.PHASE].iloc[-1] + 1,
+                )
             )
         except IndexError:
             return []
@@ -58,21 +70,27 @@ class Trace:
         Return the timespan betwenn first and last sample
         """
         try:
-            return self._data_["Timestamp"].iloc[-1] - self._data_["Timestamp"].iloc[0]
+            return (
+                self._data_[Trace.TIMESTAMP].iloc[-1]
+                - self._data_[Trace.TIMESTAMP].iloc[0]
+            )
         except IndexError:
             return 0
 
     @staticmethod
     def time_range(dataframe):
-        return dataframe["Timestamp"].iloc[0], dataframe["Timestamp"].iloc[-1]
+        return dataframe[Trace.TIMESTAMP].iloc[0], dataframe[Trace.TIMESTAMP].iloc[-1]
 
     @staticmethod
     def instruction_range(dataframe):
-        return dataframe["Instrs"].iloc[0], dataframe["Instrs"].iloc[-1]
+        return (
+            dataframe[Trace.INSTRUCTION].iloc[0],
+            dataframe[Trace.INSTRUCTION].iloc[-1],
+        )
 
     @staticmethod
     def access_range(dataframe):
-        return dataframe["Index"].iloc[0], dataframe["Index"].iloc[-1]
+        return dataframe[Trace.INDEX].iloc[0], dataframe[Trace.INDEX].iloc[-1]
 
     def __len__(self):
         return self._data_.__len__()
@@ -81,7 +99,7 @@ class Trace:
         """
         Get the virtual address of each sample in the trace.
         """
-        return self._data_["Vaddr"].values
+        return self._data_[Trace.ADDRESS].values
 
     def print_info(self):
         if self.is_empty():
@@ -92,8 +110,8 @@ class Trace:
                 "msecs".format(
                     len(self._data_),
                     len(self.phases()),
-                    self._data_["Timestamp"].iloc[0],
-                    self._data_["Timestamp"].iloc[-1],
+                    self._data_[Trace.TIMESTAMP].iloc[0],
+                    self._data_[Trace.TIMESTAMP].iloc[-1],
                 )
             )
 
@@ -110,8 +128,8 @@ class Trace:
         return t
 
     def get_phase(self, phase):
-        phase_start = np.searchsorted(self._data_["Phase"], phase, side="left")
-        phase_stop = np.searchsorted(self._data_["Phase"], phase + 1, side="right")
+        phase_start = np.searchsorted(self._data_[Trace.PHASE], phase, side="left")
+        phase_stop = np.searchsorted(self._data_[Trace.PHASE], phase + 1, side="right")
         return self._subset_(slice(phase_start, phase_stop))
 
     def get_phases(self, phase):
@@ -181,16 +199,16 @@ class TraceSet:
             s += "[{:^21}](ms)".format("empty")
         else:
             s += "[{:8g} - {:8g}](ms)".format(
-                self.trace_ddr["Timestamp"].iloc[0],
-                self.trace_ddr["Timestamp"].iloc[-1],
+                self.trace_ddr[Trace.TIMESTAMP].iloc[0],
+                self.trace_ddr[Trace.TIMESTAMP].iloc[-1],
             )
         s += " -- HBM: "
         if len(self.trace_hbm) == 0:
             s += "[{:^19}](ms)".format("empty")
         else:
             s += "[{:8g} - {:8g}](ms)".format(
-                self.trace_hbm["Timestamp"].iloc[0],
-                self.trace_hbm["Timestamp"].iloc[-1],
+                self.trace_hbm[Trace.TIMESTAMP].iloc[0],
+                self.trace_hbm[Trace.TIMESTAMP].iloc[-1],
             )
         return s
 
@@ -209,7 +227,7 @@ class TraceSet:
         return min(len(self.trace_ddr), len(self.trace_hbm)) == 0
 
     def time_end(self):
-        return self.trace_ddr["Timestamp"].iloc[-1]
+        return self.trace_ddr[Trace.TIMESTAMP].iloc[-1]
 
     def subset_phases(self, phases):
         """
@@ -270,7 +288,7 @@ class WindowIterator:
     inside phases of the trace. On each iteration, the next window is returned.
     """
 
-    def __init__(self, trace_set, compare_unit="ms", window_length=None):
+    def __init__(self, trace_set, compare_unit=Trace.TIME_UNIT, window_length=None):
         self._traces = trace_set
         self._phases = iter(trace_set.trace_ddr.phases())
         self._windows = iter([])
@@ -288,11 +306,11 @@ class WindowIterator:
 
     @staticmethod
     def _parse_unit(unit):
-        if unit == "accesses":
+        if unit == Trace.ACCESS_UNIT:
             return Trace.access_range, Trace.accesses_data
-        elif unit == "instrs":
+        elif unit == Trace.INSTRUCTION_UNIT:
             return Trace.instruction_range, Trace.instructions_data
-        elif unit == "ms":
+        elif unit == Trace.TIME_UNIT:
             return Trace.time_range, Trace.timestamps_data
         else:
             raise ValueError(
@@ -355,7 +373,7 @@ class WindowIterator:
                 _, t_end = self._bounds_fn_(ddr_win)
                 t_ddr_end = max(t_ddr_end, t_end)
                 t_ddr_end = min(t_ddr_end, ddr_e)
-                addresses = ddr_win["Vaddr"].values
+                addresses = ddr_win[Trace.ADDRESS].values
 
             self._last_timestamp_hbm = t_hbm_end
             self._last_timestamp_ddr = t_ddr_end
