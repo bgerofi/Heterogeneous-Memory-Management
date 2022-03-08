@@ -243,17 +243,21 @@ class TraceSet:
 class WindowItem:
     def __init__(
         self,
+        traces,
         t_ddr_begin,
         t_ddr_end,
         t_hbm_begin,
         t_hbm_end,
-        addresses=[],
     ):
-        self.addresses = addresses
+        self.traces = traces
         self.t_ddr_begin = t_ddr_begin
         self.t_ddr_end = t_ddr_end
         self.t_hbm_begin = t_hbm_begin
         self.t_hbm_end = t_hbm_end
+
+    @property
+    def addresses(self):
+        return self.traces.trace_ddr[Trace.ADDRESS]
 
     def __str__(self):
         s = "DDR: [{:8g} - {:8g}]".format(
@@ -279,7 +283,7 @@ class WindowItem:
         return self.t_hbm_end - self.t_hbm_begin
 
     def is_empty(self):
-        return len(self.addresses) == 0
+        return len(self.traces) == 0
 
 
 class WindowIterator:
@@ -363,7 +367,6 @@ class WindowIterator:
             t_ddr_end = self._last_timestamp_ddr + win_len_ddr
             hbm_win = self.subset_window(trace_hbm, t_hbm_begin, t_hbm_end)
             ddr_win = self.subset_window(trace_ddr, t_ddr_begin, t_ddr_end)
-            addresses = []
 
             if len(hbm_win) > 0:
                 _, t_end = self._bounds_fn_(hbm_win)
@@ -373,18 +376,17 @@ class WindowIterator:
                 _, t_end = self._bounds_fn_(ddr_win)
                 t_ddr_end = max(t_ddr_end, t_end)
                 t_ddr_end = min(t_ddr_end, ddr_e)
-                addresses = ddr_win[Trace.ADDRESS].values
 
             self._last_timestamp_hbm = t_hbm_end
             self._last_timestamp_ddr = t_ddr_end
 
             windows.append(
                 WindowItem(
+                    TraceSet(ddr_win, hbm_win),
                     t_ddr_begin,
                     t_ddr_end,
                     t_hbm_begin,
                     t_hbm_end,
-                    addresses,
                 )
             )
         self._windows = iter(windows)
