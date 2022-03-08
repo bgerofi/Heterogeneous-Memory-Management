@@ -36,24 +36,28 @@ class WindowObservationSpace(Space):
 
         # Scale rows
         if ndarray.shape[0] > self.shape[0]:
-            _ndarray = np.empty((self.shape[0], ndarray.shape[1]), dtype=self.dtype)
+            _ndarray = np.zeros((self.shape[0], ndarray.shape[1]), dtype=self.dtype)
             WindowObservationSpace._shrink_rows(ndarray, _ndarray)
         elif ndarray.shape[0] < self.shape[0]:
-            _ndarray = np.empty((self.shape[0], ndarray.shape[1]), dtype=self.dtype)
+            _ndarray = np.zeros((self.shape[0], ndarray.shape[1]), dtype=self.dtype)
             WindowObservationSpace._grow_rows(ndarray, _ndarray)
         else:
             _ndarray = ndarray
 
         # Scale columns
         if ndarray.shape[1] > self.shape[1]:
-            ndarray = np.empty(self.shape, dtype=self.dtype)
+            ndarray = np.zeros(self.shape, dtype=self.dtype)
             WindowObservationSpace._shrink_columns(_ndarray, ndarray)
         elif ndarray.shape[1] < self.shape[1]:
-            ndarray = np.empty(self.shape, dtype=self.dtype)
+            ndarray = np.zeros(self.shape, dtype=self.dtype)
             WindowObservationSpace._grow_columns(_ndarray, ndarray)
         else:
             ndarray = _ndarray
 
+        if any(np.isnan(ndarray.flatten())):
+            import sys
+
+            sys.exit("Observation with nan")
         return ndarray
 
     def from_addresses(self, vaddr):
