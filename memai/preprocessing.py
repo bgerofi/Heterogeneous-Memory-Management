@@ -10,7 +10,7 @@ from memai import (
 )
 
 
-class EnvTrace:
+class Preprocessing:
     OBSERVATION = "Observation"
     PAGE_ACCESSES = "PageAccesses"
     TIME_DDR = "TimeDDR"
@@ -99,10 +99,10 @@ class EnvTrace:
 
     def as_dict(self):
         return {
-            EnvTrace.OBSERVATION: self.observations,
-            EnvTrace.PAGE_ACCESSES: self.pages_accesses,
-            EnvTrace.TIME_DDR: self.t_ddr,
-            EnvTrace.TIME_HBM: self.t_hbm,
+            Preprocessing.OBSERVATION: self.observations,
+            Preprocessing.PAGE_ACCESSES: self.pages_accesses,
+            Preprocessing.TIME_DDR: self.t_ddr,
+            Preprocessing.TIME_HBM: self.t_hbm,
         }
 
     def as_pandas(self, output_file=None):
@@ -120,7 +120,7 @@ class EnvTrace:
         window_len=None,
         observation_space=WindowObservationSpace(128, 128),
     ):
-        env_t = EnvTrace(observation_space)
+        env_t = Preprocessing(observation_space)
         windows = WindowIterator(trace_set, compare_unit, window_len)
         progress_bar = tqdm.tqdm()
         last_timestamp = int(windows._bounds_fn_(trace_set.trace_ddr)[1])
@@ -143,10 +143,10 @@ class EnvTrace:
         else:
             raise ValueError("Expected either a pandas dataframe or a filename.")
         colnames = [
-            EnvTrace.OBSERVATION,
-            EnvTrace.PAGE_ACCESSES,
-            EnvTrace.TIME_DDR,
-            EnvTrace.TIME_HBM,
+            Preprocessing.OBSERVATION,
+            Preprocessing.PAGE_ACCESSES,
+            Preprocessing.TIME_DDR,
+            Preprocessing.TIME_HBM,
         ]
         if not all(df.columns == colnames):
             raise ValueError(
@@ -155,15 +155,15 @@ class EnvTrace:
         if len(df) == 0:
             raise ValueError("Empty traces not supported.")
 
-        first_obs = df[EnvTrace.OBSERVATION].iloc[0]
+        first_obs = df[Preprocessing.OBSERVATION].iloc[0]
         nrow, ncol = first_obs.shape
-        env_t = EnvTrace(
+        env_t = Preprocessing(
             WindowObservationSpace(nrow, ncol), page_size, interval_distance
         )
-        env_t.observations = df[EnvTrace.OBSERVATION].values
-        env_t.pages_accesses = df[EnvTrace.PAGE_ACCESSES].values
-        env_t.t_ddr = df[EnvTrace.TIME_DDR].values
-        env_t.t_hbm = df[EnvTrace.TIME_HBM].values
+        env_t.observations = df[Preprocessing.OBSERVATION].values
+        env_t.pages_accesses = df[Preprocessing.PAGE_ACCESSES].values
+        env_t.t_ddr = df[Preprocessing.TIME_DDR].values
+        env_t.t_hbm = df[Preprocessing.TIME_HBM].values
         env_t.intervals.append_addresses(
             np.unique(
                 np.array([x[0] for p in env_t.pages_accesses for x in p]).flatten()
@@ -227,7 +227,7 @@ if __name__ == "__main__":
         raise ValueError("Interval distance must be greater than page size.")
 
     print("Processing traces.")
-    env_t = EnvTrace.from_trace_set(
+    env_t = Preprocessing.from_trace_set(
         traces,
         args.page_size,
         args.interval_distance,
@@ -242,7 +242,7 @@ if __name__ == "__main__":
         print("Export processed traces to: {}".format(args.output))
     df = env_t.as_pandas(args.output)
     print("Check import matches export.")
-    env_t_copy = EnvTrace.from_pandas(df)
+    env_t_copy = Preprocessing.from_pandas(df)
 
     if env_t != env_t_copy:
         sys.exit("Conversion to and from pandas did not yield the same result.")
