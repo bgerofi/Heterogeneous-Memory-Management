@@ -14,7 +14,7 @@ class WindowObservationSpace(Space):
             raise ValueError("Invalid input. nrows > 0 and ncols > 0.")
 
         shape = [nrows, ncols]
-        super().__init__(shape, np.float64, seed)
+        super().__init__(shape, np.int64, seed)
 
     def __eq__(self, other):
         if not isinstance(other, WindowObservationSpace):
@@ -26,121 +26,37 @@ class WindowObservationSpace(Space):
     def empty(self):
         return np.zeros(self.shape, dtype=self.dtype)
 
-    def from_ndarray(self, ndarray):
-        if len(ndarray.shape) != 2:
-            raise ValueError(
-                "Invalid ndarray for observation. Array must have 2 dimensions"
-            )
-        if ndarray.dtype != self.dtype:
-            ndarray = ndarray.astype(self.dtype)
+    def from_sparse_matrix(self, x, y):
+        def scale(x, low=0, high=1):
+            max_x = np.nanmax(y)
+            min_x = np.nanmin(y)
+            x = np.array(x).copy()
 
-        # Scale rows
-        if ndarray.shape[0] > self.shape[0]:
-            _ndarray = np.zeros((self.shape[0], ndarray.shape[1]), dtype=self.dtype)
-            WindowObservationSpace._shrink_rows(ndarray, _ndarray)
-        elif ndarray.shape[0] < self.shape[0]:
-            _ndarray = np.zeros((self.shape[0], ndarray.shape[1]), dtype=self.dtype)
-            WindowObservationSpace._grow_rows(ndarray, _ndarray)
-        else:
-            _ndarray = ndarray
+            if max_x == min_x:
+                x.fill((high - low) / 2)
+                return x
+            if min_x != 0:
+                x = x - min_x
+            if (max_x - min_x) != 1:
+                x = x / (max_x - min_x)
+            if (high - low) != 1:
+                x = x * (high - low)
+            if low != 0:
+                x = x + low
+            return x
 
-        # Scale columns
-        if ndarray.shape[1] > self.shape[1]:
-            ndarray = np.zeros(self.shape, dtype=self.dtype)
-            WindowObservationSpace._shrink_columns(_ndarray, ndarray)
-        elif ndarray.shape[1] < self.shape[1]:
-            ndarray = np.zeros(self.shape, dtype=self.dtype)
-            WindowObservationSpace._grow_columns(_ndarray, ndarray)
-        else:
-            ndarray = _ndarray
+        # Scale axis and convert to integer values in shape bounds.
+        y = scale(y, 0, self.shape[1]).astype(np.uint64)
+        y = np.minimum(y, self.shape[1] - 1)
+        x = scale(x, 0, self.shape[0]).astype(np.uint64)
+        x = np.minimum(x, self.shape[0] - 1)
 
-        if any(np.isnan(ndarray.flatten())):
-            import sys
+        # Accumulate set values in empty matrix cells.
+        ndarray = self.empty()
+        for i, j in zip(x, y):
+            ndarray[i, j] += 1
 
-            sys.exit("Observation with nan")
         return ndarray
-
-    def from_addresses(self, vaddr):
-        # Create the array of observations with no observed sample
-        ndarray = np.zeros((len(vaddr), 1 + np.nanmax(vaddr)), dtype=self.dtype)
-        # Set samples with a default value.
-        for i, addr in enumerate(vaddr):
-            if addr >= 0:
-                ndarray[i, addr] = 1.0
-        # Scale the ndarray to fit this observation shape.
-        return self.from_ndarray(ndarray)
-
-    @staticmethod
-    def _shrink_rows(from_array, to_array):
-        from_shape = from_array.shape
-        to_shape = to_array.shape
-
-        p_i = from_shape[0] // to_shape[0]
-        q_i = from_shape[0] - p_i * to_shape[0]
-
-        for i in range(q_i):
-            slice_i = slice(i * (p_i + 1), (i + 1) * (p_i + 1))
-            to_array[i, :] = np.sum(from_array[slice_i, :], 0)
-
-        offset = q_i * (p_i + 1)
-        for i in range(q_i, to_shape[0] - q_i):
-            slice_i = slice(offset + p_i * i, offset + p_i * (i + 1))
-            to_array[i, :] = np.sum(from_array[slice_i, :], 0)
-
-    @staticmethod
-    def _shrink_columns(from_array, to_array):
-        from_shape = from_array.shape
-        to_shape = to_array.shape
-
-        p_j = from_shape[1] // to_shape[1]
-        q_j = from_shape[1] - p_j * to_shape[1]
-
-        for j in range(q_j):
-            slice_j = slice(j * (p_j + 1), (j + 1) * (p_j + 1))
-            to_array[:, j] = np.sum(from_array[:, slice_j], 1)
-
-        offset = q_j * (p_j + 1)
-        for j in range(q_j, to_shape[1] - q_j):
-            slice_j = slice(offset + p_j * j, offset + p_j * (j + 1))
-            to_array[:, j] = np.sum(from_array[:, slice_j], 1)
-
-    @staticmethod
-    def _grow_rows(from_array, to_array):
-        from_shape = from_array.shape
-        to_shape = to_array.shape
-
-        p_i = to_shape[0] // from_shape[0]
-        q_i = to_shape[0] - p_i * from_shape[0]
-
-        for i in range(q_i):
-            slice_i = slice(i * (p_i + 1), (i + 1) * (p_i + 1))
-            to_array[slice_i, :] = from_array[i, :] / slen(slice_i)
-
-        offset = q_i * (p_i + 1)
-        for i in range(q_i, from_shape[0] - q_i):
-            slice_i = slice(offset + p_i * i, offset + p_i * (i + 1))
-            to_array[slice_i, :] = from_array[i, :] / slen(slice_i)
-
-    @staticmethod
-    def _grow_columns(from_array, to_array):
-        from_shape = from_array.shape
-        to_shape = to_array.shape
-
-        p_j = to_shape[1] // from_shape[1]
-        q_j = to_shape[1] - p_j * from_shape[1]
-
-        for j in range(q_j):
-            slice_j = slice(j * (p_j + 1), (j + 1) * (p_j + 1))
-            to_array[:, slice_j] = (from_array[:, j] / slen(slice_j)).reshape(
-                (from_shape[0], 1)
-            )
-
-        offset = q_j * (p_j + 1)
-        for j in range(q_j, from_shape[1] - q_j):
-            slice_j = slice(offset + p_j * j, offset + p_j * (j + 1))
-            to_array[:, slice_j] = (from_array[:, j] / slen(slice_j)).reshape(
-                (from_shape[0], 1)
-            )
 
     def sample(self) -> np.ndarray:
         return self.np_random.sample(self.shape, dtype=self.dtype)
@@ -152,63 +68,3 @@ class WindowObservationSpace(Space):
             return len(x.shape) == 2
         else:
             return False
-
-
-class TestWindowObservation(unittest.TestCase):
-    def test_same_size(self):
-        array = np.empty((2, 2))
-        array[:] = 1
-        obs_array = WindowObservationSpace(2, 2).from_ndarray(array)
-        self.assertTrue(array.tolist() == obs_array.tolist())
-
-    def test_grow_lines(self):
-        array = np.empty((2, 2))
-        array[:] = 1
-        comp_array = np.empty((4, 2))
-        comp_array[:] = 0.5
-        obs_array = WindowObservationSpace(4, 2).from_ndarray(array)
-        self.assertTrue(comp_array.tolist() == obs_array.tolist())
-
-    def test_grow_columns(self):
-        array = np.empty((2, 2))
-        array[:] = 1
-        comp_array = np.empty((2, 4))
-        comp_array[:] = 0.5
-        obs_array = WindowObservationSpace(2, 4).from_ndarray(array)
-        self.assertTrue(comp_array.tolist() == obs_array.tolist())
-
-    def test_grow(self):
-        array = np.empty((2, 2))
-        array[:] = 1
-        comp_array = np.empty((4, 4))
-        comp_array[:] = 0.25
-        obs_array = WindowObservationSpace(4, 4).from_ndarray(array)
-        self.assertTrue(comp_array.tolist() == obs_array.tolist())
-
-    def test_shrink_lines(self):
-        array = np.empty((4, 4))
-        array[:] = 1
-        comp_array = np.empty((2, 4))
-        comp_array[:] = 2
-        obs_array = WindowObservationSpace(2, 4).from_ndarray(array)
-        self.assertTrue(comp_array.tolist() == obs_array.tolist())
-
-    def test_shrink_columns(self):
-        array = np.empty((4, 4))
-        array[:] = 1
-        comp_array = np.empty((4, 2))
-        comp_array[:] = 2
-        obs_array = WindowObservationSpace(4, 2).from_ndarray(array)
-        self.assertTrue(comp_array.tolist() == obs_array.tolist())
-
-    def test_shrink(self):
-        array = np.empty((4, 4))
-        array[:] = 1
-        comp_array = np.empty((2, 2))
-        comp_array[:] = 4
-        obs_array = WindowObservationSpace(2, 2).from_ndarray(array)
-        self.assertTrue(comp_array.tolist() == obs_array.tolist())
-
-
-if __name__ == "__main__":
-    unittest.main()

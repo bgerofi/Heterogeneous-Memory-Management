@@ -52,3 +52,22 @@ def add_window_args(parser):
         type=int,
         help="The size of a page in number of bits.",
     )
+
+
+def add_observation_args(parser):
+    parser.add_argument(
+        "--observation-rows",
+        metavar="<int>",
+        type=int,
+        default=128,
+        help=("The number of row in an observation (window of timestamp X address)."),
+    )
+    parser.add_argument(
+        "--observation-columns",
+        metavar="<int>",
+        type=int,
+        default=128,
+        help=(
+            "The number of columns in an observation (window of timestamp X address)."
+        ),
+    )

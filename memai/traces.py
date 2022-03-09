@@ -257,7 +257,7 @@ class WindowItem:
 
     @property
     def addresses(self):
-        return self.traces.trace_ddr[Trace.ADDRESS]
+        return self.traces.trace_ddr[Trace.ADDRESS].values
 
     def __str__(self):
         s = "DDR: [{:8g} - {:8g}]".format(
