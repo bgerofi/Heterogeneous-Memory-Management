@@ -14,32 +14,35 @@ class TraceEnv(Env):
     def __init__(
         self,
         preprocessed_file,
-        page_size=20,
-        interval_distance=28,
-        observation_space=WindowObservationSpace(128, 128),
-        action_space=MovePagesActionSpace(
-            num_actions=128, move_page_cost=10, page_size=1 << 14
-        ),
+        num_actions=128,
+        move_page_cost=10,
     ):
+
+        preprocess_args = Preprocessing.parse_filename(preprocessed_file)
         # Gym specific attributes
-        self.observation_space = observation_space
-        self.action_space = action_space
+        self.observation_space = preprocess_args["observation_space"]
+        self.action_space = MovePagesActionSpace(
+            num_actions, move_page_cost, preprocess_args["page_size"]
+        )
+        self._compare_unit = preprocess_args["compare_unit"]
         self._preprocessing = Preprocessing.from_pandas(
             preprocessed_file,
-            page_size,
-            interval_distance,
-            observation_space,
+            preprocess_args["page_size"],
+            preprocess_args["interval_distance"],
+            preprocess_args["observation_space"],
         )
         self._reset()
 
     def _reset(self):
         self._hbm_intervals = IntervalTree()
-        self.estimated_time = 0.0
+        self._estimated_times = []
         self.move_pages_time = 0.0
-        self.hbm_time = 0.0
-        self.ddr_time = 0.0
         self._iterator = iter(self._preprocessing)
         self._previous_input = None
+
+    @property
+    def estimated_time(self):
+        return sum({i: j for i, j in self._estimated_times}.values())
 
     def step(self, action):
         try:
@@ -52,16 +55,14 @@ class TraceEnv(Env):
                 move_pages_time = 0
 
             # Get next window, associated observations and estimation.
-            observation, pages, count, t_ddr, t_hbm = next(self._iterator)
+            observation, pages, count, t_ddr, t_hbm, i = next(self._iterator)
             pages_access = list(zip(pages, count))
             estimated_time = Estimator.estimate_window(
                 pages_access, t_ddr, t_hbm, self._hbm_intervals
             )
 
-            self.hbm_time += t_hbm
-            self.ddr_time += t_ddr
             self.move_pages_time += move_pages_time
-            self.estimated_time += estimated_time
+            self._estimated_times.append((i, estimated_time))
             self._previous_input = pages_access
 
             # The reward is negative for moving pages (we want to avoid that)
@@ -118,9 +119,6 @@ if __name__ == "__main__":
     from memai.options import *
 
     parser = argparse.ArgumentParser()
-    add_window_args(parser)
-    add_observation_args(parser)
-    add_interval_args(parser)
 
     parser.add_argument(
         "--input",
@@ -147,31 +145,34 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    observation_space = WindowObservationSpace(
-        args.observation_rows, args.observation_columns
-    )
-
-    action_space = MovePagesActionSpace(
-        args.num_actions, args.move_page_cost, args.page_size
-    )
     env = TraceEnv(
         args.input,
-        args.page_size,
-        args.interval_distance,
-        observation_space=observation_space,
-        action_space=action_space,
+        args.num_actions,
+        args.move_page_cost,
     )
 
     stop = False
     t = time.time()
     while not stop:
-        observation, reward, stop, debug_info = env.step(action_space.sample())
+        observation, reward, stop, debug_info = env.step(env.action_space.sample())
     simulation_time = time.time() - t
     simulated_time = env.estimated_time + env.move_pages_time
 
-    print("Time DDR: {:.2f} (s)".format(env.ddr_time / 1000.0))
-    print("Time HBM: {:.2f} (s)".format(env.hbm_time / 1000.0))
-    print("Simulated Time: {:.2f} (s)".format(simulated_time / 1000.0))
-    print("\tEstimated Time: {:.2f} (s)".format(env.estimated_time / 1000.0))
-    print("\tMove Pages Time: {:.2f} (s)".format(env.move_pages_time / 1000.0))
+    t_hbm = sum(
+        {
+            i: j for i, j in zip(env._preprocessing.windows, env._preprocessing.t_hbm)
+        }.values()
+    )
+    t_ddr = sum(
+        {
+            i: j for i, j in zip(env._preprocessing.windows, env._preprocessing.t_ddr)
+        }.values()
+    )
+    print("Time DDR: {:.2f} ({})".format(t_ddr, env._compare_unit))
+    print("Time HBM: {:.2f} ({})".format(t_hbm, env._compare_unit))
+    print("Simulated Time: {:.2f} ({})".format(simulated_time, env._compare_unit))
+    print("\tEstimated Time: {:.2f} ({})".format(env.estimated_time, env._compare_unit))
+    print(
+        "\tMove Pages Time: {:.2f} ({})".format(env.move_pages_time, env._compare_unit)
+    )
     print("Simulation Time: {:.2f} (s)".format(simulation_time))

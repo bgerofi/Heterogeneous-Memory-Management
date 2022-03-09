@@ -1,3 +1,4 @@
+import re
 import numpy as np
 import pandas as pd
 import tqdm
@@ -16,6 +17,7 @@ class Preprocessing:
     ACCESSES = "Accesses"
     TIME_DDR = "TimeDDR"
     TIME_HBM = "TimeHBM"
+    WINDOW = "Window"
 
     def __init__(
         self,
@@ -29,10 +31,19 @@ class Preprocessing:
         self.accesses = []
         self.t_ddr = []
         self.t_hbm = []
+        self.windows = []
         self.intervals = IntervalDetector(1 << interval_distance, 1 << page_size)
+        self._window_index = 0
 
     def __iter__(self):
-        return zip(self.observations, self.pages, self.accesses, self.t_ddr, self.t_hbm)
+        return zip(
+            self.observations,
+            self.pages,
+            self.accesses,
+            self.t_ddr,
+            self.t_hbm,
+            self.windows,
+        )
 
     def _append_(self, observation, pages, accesses, t_ddr, t_hbm):
         self.observations.append(observation)
@@ -40,6 +51,7 @@ class Preprocessing:
         self.accesses.append(accesses)
         self.t_ddr.append(t_ddr)
         self.t_hbm.append(t_hbm)
+        self.windows.append(self._window_index)
 
     def __eq__(self, other):
         if not all(np.array(self.t_hbm) == np.array(other.t_hbm)):
@@ -81,6 +93,8 @@ class Preprocessing:
             observation = self.observation_space.from_sparse_matrix(timestamps, addr)
             self._append_(observation, page, count, window.t_ddr, window.t_hbm)
 
+        self._window_index += 1
+
     def as_dict(self):
         return {
             Preprocessing.OBSERVATION: [o.flatten() for o in self.observations],
@@ -88,6 +102,7 @@ class Preprocessing:
             Preprocessing.ACCESSES: self.accesses,
             Preprocessing.TIME_DDR: self.t_ddr,
             Preprocessing.TIME_HBM: self.t_hbm,
+            Preprocessing.WINDOW: self.windows,
         }
 
     def as_pandas(self, output_file=None):
@@ -138,6 +153,7 @@ class Preprocessing:
             Preprocessing.ACCESSES,
             Preprocessing.TIME_DDR,
             Preprocessing.TIME_HBM,
+            Preprocessing.WINDOW,
         ]
         if not all(df.columns == colnames):
             raise ValueError(
@@ -155,18 +171,56 @@ class Preprocessing:
         env_t.accesses = df[Preprocessing.ACCESSES].values
         env_t.t_ddr = df[Preprocessing.TIME_DDR].values
         env_t.t_hbm = df[Preprocessing.TIME_HBM].values
+        env_t.windows = df[Preprocessing.WINDOW].values
         env_t.intervals.append_addresses(np.unique(np.concatenate(env_t.pages)))
         return env_t
 
+    @staticmethod
+    def parse_filename(filename):
+        interval_distance = re.findall("interval_distance=(?P<dist>[0-9]+)", filename)
+        if len(interval_distance) == 0:
+            raise ValueError("Filename does not contain 'interval_distance' value.")
+        interval_distance = int(interval_distance[0])
 
-if __name__ == "__main__":
-    import argparse
-    from memai import Trace, TraceSet
-    from memai.options import *
-    import sys
-    import os
+        window_len = re.findall("window_len=(?P<dist>[0-9]+)", filename)
+        if len(window_len) == 0:
+            raise ValueError("Filename does not contain 'interval_distance' value.")
+        window_len = int(window_len[0])
 
-    def make_output(
+        page_size = re.findall("page_size=(?P<dist>[0-9]+)", filename)
+        if len(page_size) == 0:
+            raise ValueError("Filename does not contain 'interval_distance' value.")
+        page_size = int(page_size[0])
+
+        observation_rows = re.findall("observation_rows=(?P<dist>[0-9]+)", filename)
+        if len(observation_rows) == 0:
+            raise ValueError("Filename does not contain 'interval_distance' value.")
+        observation_rows = int(observation_rows[0])
+
+        observation_columns = re.findall(
+            "observation_columns=(?P<dist>[0-9]+)", filename
+        )
+        if len(observation_columns) == 0:
+            raise ValueError("Filename does not contain 'interval_distance' value.")
+        observation_columns = int(observation_columns[0])
+
+        compare_unit = re.findall("compare_unit=(?P<dist>[A-Za-z]+)", filename)
+        if len(compare_unit) == 0:
+            raise ValueError("Filename does not contain 'interval_distance' value.")
+        compare_unit = compare_unit[0]
+
+        return {
+            "interval_distance": interval_distance,
+            "window_len": window_len,
+            "page_size": page_size,
+            "compare_unit": compare_unit,
+            "observation_space": WindowObservationSpace(
+                observation_rows, observation_columns
+            ),
+        }
+
+    @staticmethod
+    def make_filename(
         ddr_filename,
         window_len,
         compare_unit,
@@ -190,32 +244,31 @@ if __name__ == "__main__":
         f.append("observation_columns={}".format(observation_columns))
         return "-".join(f) + ".feather"
 
+
+if __name__ == "__main__":
+    import argparse
+    from memai import Trace, TraceSet
+    from memai.options import *
+    import sys
+    import os
+
     parser = argparse.ArgumentParser()
     add_traces_input_args(parser)
     add_window_args(parser)
     add_observation_args(parser)
     add_interval_args(parser)
 
-    parser.add_argument(
-        "--output",
-        metavar="<file>",
-        type=str,
-        default=None,
-        help=("Where to write the obtained pandas dataframe."),
-    )
-
     args = parser.parse_args()
 
-    if args.output is None:
-        args.output = make_output(
-            args.ddr_input,
-            args.window_len,
-            args.compare_unit,
-            args.interval_distance,
-            args.page_size,
-            args.observation_rows,
-            args.observation_columns,
-        )
+    output = Preprocessing.make_filename(
+        args.ddr_input,
+        args.window_len,
+        args.compare_unit,
+        args.interval_distance,
+        args.page_size,
+        args.observation_rows,
+        args.observation_columns,
+    )
 
     ddr_trace = Trace(args.ddr_input, args.cpu_cycles_per_ms)
     hbm_trace = Trace(args.hbm_input, args.cpu_cycles_per_ms)
@@ -239,8 +292,8 @@ if __name__ == "__main__":
         observation_space,
     )
 
-    print("Export processed traces to: {}".format(args.output))
-    df = env_t.as_pandas(args.output)
+    print("Export processed traces to: {}".format(output))
+    df = env_t.as_pandas(output)
     print("Check import matches export.")
     env_t_copy = Preprocessing.from_pandas(
         df,
@@ -251,5 +304,3 @@ if __name__ == "__main__":
 
     if env_t != env_t_copy:
         raise ValueError("Conversion to and from pandas did not yield the same result.")
-
-    print("Success.")
