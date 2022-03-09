@@ -26,7 +26,7 @@ class MovePagesActionSpace(Space):
         hbm_intervals.merge_overlaps(strict=False)
         return len(pages)
 
-    def do_action(self, action, action_addr_interval, hbm_intervals):
+    def do_action(self, action, action_inputs, hbm_intervals):
         return 0
 
     def sample(self) -> np.ndarray:

@@ -71,3 +71,16 @@ def add_observation_args(parser):
             "The number of columns in an observation (window of timestamp X address)."
         ),
     )
+
+
+def add_interval_args(parser):
+    parser.add_argument(
+        "--interval-distance",
+        metavar="<int>",
+        type=int,
+        default=20,
+        help=(
+            "Minimum distance seperating two non contiguous chunks of memory."
+            "The value is the exponent of a power of two."
+        ),
+    )

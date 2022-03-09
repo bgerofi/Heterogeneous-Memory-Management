@@ -32,7 +32,7 @@ class Preprocessing:
         self.intervals = IntervalDetector(1 << interval_distance, 1 << page_size)
 
     def __iter__(self):
-        return zip(self.observations, self.pages_accesses, self.t_ddr, self.t_hbm)
+        return zip(self.observations, self.pages, self.accesses, self.t_ddr, self.t_hbm)
 
     def _append_(self, observation, pages, accesses, t_ddr, t_hbm):
         self.observations.append(observation)
@@ -194,6 +194,7 @@ if __name__ == "__main__":
     add_traces_input_args(parser)
     add_window_args(parser)
     add_observation_args(parser)
+    add_interval_args(parser)
 
     parser.add_argument(
         "--output",
@@ -201,16 +202,6 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help=("Where to write the obtained pandas dataframe."),
-    )
-    parser.add_argument(
-        "--interval-distance",
-        metavar="<int>",
-        type=int,
-        default=20,
-        help=(
-            "Minimum distance seperating two non contiguous chunks of memory."
-            "The value is the exponent of a power of two."
-        ),
     )
 
     args = parser.parse_args()
