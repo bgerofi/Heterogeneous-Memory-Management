@@ -22,8 +22,8 @@ class Preprocessing:
     def __init__(
         self,
         observation_space=WindowObservationSpace(128, 128),
-        page_size=2 ^ 20,
-        interval_distance=2 ^ 28,
+        page_size=20,
+        interval_distance=28,
     ):
         self.observation_space = observation_space
         self.observations = []
@@ -53,26 +53,7 @@ class Preprocessing:
         self.t_hbm.append(t_hbm)
         self.windows.append(self._window_index)
 
-    def __eq__(self, other):
-        if not all(np.array(self.t_hbm) == np.array(other.t_hbm)):
-            return False
-        if not all(np.array(self.t_ddr) == np.array(other.t_ddr)):
-            return False
-
-        for self_obs, other_obs in zip(self.observations, other.observations):
-            if not all(self_obs.flatten() == other_obs.flatten()):
-                return False
-
-        if not all(np.concatenate(self.accesses) == np.concatenate(other.accesses)):
-            return False
-        if not all(np.concatenate(self.pages) == np.concatenate(other.pages)):
-            return False
-        return True
-
-    def __ne__(self, other):
-        return not self.__eq__(other)
-
-    def append_window(self, window):
+    def _append_window_(self, window):
         if window.is_empty():
             self._append_(
                 self.observation_space.empty(), [], [], window.t_ddr, window.t_hbm
@@ -120,19 +101,19 @@ class Preprocessing:
         window_len=None,
         observation_space=WindowObservationSpace(128, 128),
     ):
-        env_t = Preprocessing(observation_space, page_size, interval_distance)
+        pre = Preprocessing(observation_space, page_size, interval_distance)
         windows = WindowIterator(trace_set, compare_unit, window_len)
         progress_bar = tqdm.tqdm()
         last_timestamp = int(windows._bounds_fn_(trace_set.trace_ddr)[1])
         progress_bar.reset(total=last_timestamp)
 
         for window in windows:
-            env_t.append_window(window)
+            pre._append_window_(window)
             progress_bar.update(int(window.t_ddr))
 
         progress_bar.update(last_timestamp)
         progress_bar.clear()
-        return env_t
+        return pre
 
     @staticmethod
     def from_pandas(
@@ -162,18 +143,18 @@ class Preprocessing:
         if len(df) == 0:
             raise ValueError("Empty traces not supported.")
 
-        env_t = Preprocessing(observation_space, page_size, interval_distance)
-        env_t.observations = [
+        pre = Preprocessing(observation_space, page_size, interval_distance)
+        pre.observations = [
             o.reshape(observation_space.shape)
             for o in df[Preprocessing.OBSERVATION].values
         ]
-        env_t.pages = df[Preprocessing.PAGES].values
-        env_t.accesses = df[Preprocessing.ACCESSES].values
-        env_t.t_ddr = df[Preprocessing.TIME_DDR].values
-        env_t.t_hbm = df[Preprocessing.TIME_HBM].values
-        env_t.windows = df[Preprocessing.WINDOW].values
-        env_t.intervals.append_addresses(np.unique(np.concatenate(env_t.pages)))
-        return env_t
+        pre.pages = df[Preprocessing.PAGES].values
+        pre.accesses = df[Preprocessing.ACCESSES].values
+        pre.t_ddr = df[Preprocessing.TIME_DDR].values
+        pre.t_hbm = df[Preprocessing.TIME_HBM].values
+        pre.windows = df[Preprocessing.WINDOW].values
+        pre.intervals.append_addresses(np.unique(np.concatenate(pre.pages)))
+        return pre
 
     @staticmethod
     def parse_filename(filename):
@@ -283,7 +264,7 @@ if __name__ == "__main__":
     observation_space = WindowObservationSpace(
         args.observation_rows, args.observation_columns
     )
-    env_t = Preprocessing.from_trace_set(
+    pre = Preprocessing.from_trace_set(
         traces,
         args.page_size,
         args.interval_distance,
@@ -291,16 +272,5 @@ if __name__ == "__main__":
         args.window_len,
         observation_space,
     )
-
     print("Export processed traces to: {}".format(output))
-    df = env_t.as_pandas(output)
-    print("Check import matches export.")
-    env_t_copy = Preprocessing.from_pandas(
-        df,
-        args.page_size,
-        args.interval_distance,
-        observation_space,
-    )
-
-    if env_t != env_t_copy:
-        raise ValueError("Conversion to and from pandas did not yield the same result.")
+    df = pret.as_pandas(output)
