@@ -147,11 +147,16 @@ class TraceEnv(Env):
             return None
 
     def render(self, mode="human"):
-        total_time = self.estimated_time_ / 1000.0
-        penalty_time = self.move_pages_time_ / 1000.0
 
-        s = "Estimated time = {.2f}(s): ({.2f}(s) + {.2f}(s) penalty on page moves)".format(
-            total_time + penalty_time, total_time, penalty_time
+        s = "{:8g}({}) {:8g}({}) {:8g}({}) {:8g}({})".format(
+            self.t_hbm,
+            self._compare_unit,
+            self.estimated_time,
+            self._compare_unit,
+            self.move_pages_time,
+            self._compare_unit,
+            self.t_ddr,
+            self._compare_unit,
         )
 
         if mode == "ansi":
