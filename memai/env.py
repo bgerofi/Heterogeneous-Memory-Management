@@ -35,14 +35,23 @@ class TraceEnv(Env):
 
     def _reset(self):
         self._hbm_intervals = IntervalTree()
-        self._estimated_times = []
+        self._estimated_times = {}
+        self._window_index = 0
         self.move_pages_time = 0.0
         self._iterator = iter(self._preprocessing)
         self._previous_input = None
 
     @property
     def estimated_time(self):
-        return sum({i: j for i, j in self._estimated_times}.values())
+        return sum((v[2] for v in self._estimated_times.values() if type(v) == tuple))
+
+    @property
+    def t_ddr(self):
+        return sum((v[0] for v in self._estimated_times.values()))
+
+    @property
+    def t_hbm(self):
+        return sum((v[1] for v in self._estimated_times.values()))
 
     def step(self, action):
         try:
@@ -62,7 +71,36 @@ class TraceEnv(Env):
             )
 
             self.move_pages_time += move_pages_time
-            self._estimated_times.append((i, estimated_time))
+            # If we already encountered the window, we only append pages access
+            # for evaluation at the end of the window.
+            try:
+                self._estimated_times[i][2] = np.concatenate(
+                    (self._estimated_times[i][2], pages)
+                )
+                self._estimated_times[i][3] = np.concatenate(
+                    (self._estimated_times[i][3], count)
+                )
+            # If this is a new window starting.
+            # We estimate the time on the past window and initialize the current
+            # window.
+            except KeyError:
+                if i > 0:  # skip first iteration.
+                    self._estimate_window()
+                # Initialize new window.
+                # t_ddr, t_hbm and hbm mappings are not updated with other
+                # observations of the same window since they all share the same.
+                # hbm mappings are copied before actions on new are performed
+                # such that time estimation for the window happens before the AI
+                # can move pages with the knowledge of this window memory
+                # accesss.
+                self._estimated_times[i] = [
+                    t_ddr,
+                    t_hbm,
+                    pages,
+                    count,
+                    self._hbm_intervals.copy(),
+                ]
+                self._window_index = i
             self._previous_input = pages_access
 
             # The reward is negative for moving pages (we want to avoid that)
@@ -70,6 +108,10 @@ class TraceEnv(Env):
             stop = False
 
         except StopIteration:
+            # Don't forget to estimate last window.
+            self._estimate_window()
+            # Sum all estimations into the total estimated execution time.
+            estimated_time = sum((v[0] for v in self._estimated_times.values()))
             # The reward is negative for the total elapsed time
             # (we want to minimize elapsed time).
             reward = -1.0 * self.estimated_time
@@ -78,6 +120,14 @@ class TraceEnv(Env):
 
         debug_info = {}
         return observation, reward, stop, debug_info
+
+    def _estimate_window(self):
+        i = self._window_index
+        t_ddr, t_hbm, pages, count, intervals = self._estimated_times[i]
+        estimated_time = Estimator.estimate_window(
+            list(zip(pages, count)), t_ddr, t_hbm, intervals
+        )
+        self._estimated_times[i] = (t_ddr, t_hbm, estimated_time)
 
     def reset(
         self,
@@ -158,18 +208,8 @@ if __name__ == "__main__":
     simulation_time = time.time() - t
     simulated_time = env.estimated_time + env.move_pages_time
 
-    t_hbm = sum(
-        {
-            i: j for i, j in zip(env._preprocessing.windows, env._preprocessing.t_hbm)
-        }.values()
-    )
-    t_ddr = sum(
-        {
-            i: j for i, j in zip(env._preprocessing.windows, env._preprocessing.t_ddr)
-        }.values()
-    )
-    print("Time DDR: {:.2f} ({})".format(t_ddr, env._compare_unit))
-    print("Time HBM: {:.2f} ({})".format(t_hbm, env._compare_unit))
+    print("Time DDR: {:.2f} ({})".format(env.t_ddr, env._compare_unit))
+    print("Time HBM: {:.2f} ({})".format(env.t_hbm, env._compare_unit))
     print("Simulated Time: {:.2f} ({})".format(simulated_time, env._compare_unit))
     print("\tEstimated Time: {:.2f} ({})".format(env.estimated_time, env._compare_unit))
     print(
