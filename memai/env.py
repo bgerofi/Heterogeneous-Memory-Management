@@ -1,13 +1,14 @@
 from memai import (
     Estimator,
     WindowObservationSpace,
-    MovePagesActionSpace,
+    NeighborActionSpace,
     Preprocessing,
 )
 
 from gym import Env, spaces
 import numpy as np
 from intervaltree import IntervalTree
+import tqdm
 
 
 class TraceEnv(Env):
@@ -15,13 +16,13 @@ class TraceEnv(Env):
         self,
         preprocessed_file,
         num_actions=128,
-        move_page_cost=10,
+        move_page_cost=0.01,
     ):
 
         preprocess_args = Preprocessing.parse_filename(preprocessed_file)
         # Gym specific attributes
         self.observation_space = preprocess_args["observation_space"]
-        self.action_space = MovePagesActionSpace(
+        self.action_space = NeighborActionSpace(
             num_actions, move_page_cost, preprocess_args["page_size"]
         )
         self._compare_unit = preprocess_args["compare_unit"]
@@ -31,6 +32,7 @@ class TraceEnv(Env):
             preprocess_args["interval_distance"],
             preprocess_args["observation_space"],
         )
+        self.progress_bar = tqdm.tqdm()
         self._reset()
 
     def _reset(self):
@@ -40,6 +42,7 @@ class TraceEnv(Env):
         self.move_pages_time = 0.0
         self._iterator = iter(self._preprocessing)
         self._previous_input = None
+        self.progress_bar.reset(total=len(self._preprocessing))
 
     @property
     def estimated_time(self):
@@ -58,7 +61,9 @@ class TraceEnv(Env):
             # Do action (move pages) and retrieve move pages penalty.
             if self._previous_input is not None:
                 move_pages_time = self.action_space.do_action(
-                    action, self._previous_input, self._hbm_intervals
+                    action,
+                    self._hbm_intervals,
+                    *self._previous_input,
                 )
             else:
                 move_pages_time = 0
@@ -101,11 +106,12 @@ class TraceEnv(Env):
                     self._hbm_intervals.copy(),
                 ]
                 self._window_index = i
-            self._previous_input = pages_access
+            self._previous_input = (observation, pages, count, t_ddr, t_hbm)
 
             # The reward is negative for moving pages (we want to avoid that)
             reward = -1.0 * move_pages_time
             stop = False
+            self.progress_bar.update(1)
 
         except StopIteration:
             # Don't forget to estimate last window.
@@ -117,7 +123,8 @@ class TraceEnv(Env):
             reward = -1.0 * self.estimated_time
             stop = True
             observation = None
-
+            self.progress_bar.update(len(self._preprocessing))
+            self.progress_bar.clear()
         debug_info = {}
         return observation, reward, stop, debug_info
 
@@ -192,9 +199,19 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--move-page-cost",
-        metavar="<int>",
-        default=10,
-        type=int,
+        metavar="<float>",
+        default=0.01,
+        type=float,
+        help="The cost of moving a page in milliseconds.",
+    )
+
+    actions = ["random", "all_hbm", "all_ddr"]
+    parser.add_argument(
+        "--action",
+        metavar="<action_kind>",
+        default="random",
+        type=str,
+        choices=actions,
         help="The cost of moving a page in milliseconds.",
     )
 
@@ -209,7 +226,13 @@ if __name__ == "__main__":
     stop = False
     t = time.time()
     while not stop:
-        observation, reward, stop, debug_info = env.step(env.action_space.sample())
+        if args.action == "random":
+            action = env.action_space.sample()
+        elif args.action == "all_hbm":
+            action = env.action_space.all_to_hbm_action()
+        elif args.action == "all_ddr":
+            action = env.action_space.all_to_ddr_action()
+        observation, reward, stop, debug_info = env.step(action)
     simulation_time = time.time() - t
     simulated_time = env.estimated_time + env.move_pages_time
 

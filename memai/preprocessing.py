@@ -35,6 +35,9 @@ class Preprocessing:
         self.intervals = IntervalDetector(1 << interval_distance, 1 << page_size)
         self._window_index = 0
 
+    def __len__(self):
+        return len(self.observations)
+
     def __iter__(self):
         return zip(
             self.observations,
