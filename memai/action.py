@@ -3,12 +3,20 @@ import numpy as np
 
 
 class DefaultActionSpace(Space):
-    def __init__(self, num_actions, move_page_cost=10, page_size=1 << 14, seed=None):
+    def __init__(
+        self,
+        num_actions,
+        move_page_cost=10,
+        page_size=1 << 14,
+        hbm_size=np.iinfo(np.int64).max,
+        seed=None,
+    ):
         super().__init__([num_actions], np.uint8, seed)
         self._move_page_cost = move_page_cost
         self._page_size = page_size
         self._page_shift = int(np.round(np.log2(1 << 14)))
         self._page_mask = ~(page_size - 1)
+        self._hbm_size = hbm_size
 
     def do_action(self, action, hbm_intervals, *args):
         return 0
@@ -66,6 +74,10 @@ class NeighborActionSpace(DefaultActionSpace):
 
         for p in remove_pages:
             hbm_intervals.removei(p, p + chunk_size)
+
+        available_size = self._hbm_size - sum([i.end - i.begin for i in hbm_intervals])
+        add_pages = add_pages[: available_size // chunk_size]
+
         for p in add_pages:
             hbm_intervals.addi(p, p + chunk_size)
         hbm_intervals.merge_overlaps(strict=False)

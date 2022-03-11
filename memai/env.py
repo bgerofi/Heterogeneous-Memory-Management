@@ -17,13 +17,17 @@ class TraceEnv(Env):
         preprocessed_file,
         num_actions=128,
         move_page_cost=0.01,
+        hbm_size=1 << 34,
     ):
 
         preprocess_args = Preprocessing.parse_filename(preprocessed_file)
         # Gym specific attributes
         self.observation_space = preprocess_args["observation_space"]
         self.action_space = NeighborActionSpace(
-            num_actions, move_page_cost, preprocess_args["page_size"]
+            num_actions,
+            move_page_cost,
+            preprocess_args["page_size"],
+            hbm_size,
         )
         self._compare_unit = preprocess_args["compare_unit"]
         self._preprocessing = Preprocessing.from_pandas(
@@ -204,6 +208,13 @@ if __name__ == "__main__":
         type=float,
         help="The cost of moving a page in milliseconds.",
     )
+    parser.add_argument(
+        "--hbm-size",
+        metavar="<int>",
+        default=1 << 14,
+        type=int,
+        help="The size of the HBM memory in MiBytes",
+    )
 
     actions = ["random", "all_hbm", "all_ddr"]
     parser.add_argument(
@@ -221,6 +232,7 @@ if __name__ == "__main__":
         args.input,
         args.num_actions,
         args.move_page_cost,
+        args.hbm_size << 20,
     )
 
     stop = False
