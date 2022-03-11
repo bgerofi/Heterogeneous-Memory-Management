@@ -38,18 +38,18 @@ class Estimator:
                 self._empty_time += window.t_ddr
                 continue
 
-            if False:  # hbm_time * 1.03 >= ddr_time:
-                fast_time = Estimator.estimate_fast(window.t_ddr, window.t_hbm)
-                self._fast_time += fast_time
-            else:
-                addr, count = np.unique(
-                    window.addresses & page_mask,
-                    return_counts=True,
-                )
-                pages = list(zip(addr, count))
-                self._ddr_time.append(window.t_ddr)
-                self._hbm_time.append(window.t_hbm)
-                self._pages.append(pages)
+            # if False:  # hbm_time * 1.03 >= ddr_time:
+            #     fast_time = Estimator.estimate_fast(window.t_ddr, window.t_hbm)
+            #     self._fast_time += fast_time
+            # else:
+            addr, count = np.unique(
+                window.addresses & page_mask,
+                return_counts=True,
+            )
+            pages = list(zip(addr, count))
+            self._ddr_time.append(window.t_ddr)
+            self._hbm_time.append(window.t_hbm)
+            self._pages.append(pages)
 
         self._cumulated_ddr_time = (
             sum(self._ddr_time) + self._fast_time + self._empty_time
@@ -80,16 +80,16 @@ class Estimator:
     def estimate_window(page_accesses, t_ddr, t_hbm, hbm_intervals, hbm_factor=1.0):
         if len(page_accesses) == 0:
             return t_ddr
-        if t_ddr < (1.03 * t_hbm):
-            return Estimator.estimate_fast(t_ddr, t_hbm)
-        else:
-            return Estimator.estimate_accurate(
-                page_accesses,
-                t_ddr,
-                t_hbm,
-                hbm_intervals,
-                hbm_factor,
-            )
+        # if t_ddr < (1.03 * t_hbm):
+        #     return Estimator.estimate_fast(t_ddr, t_hbm)
+        # else:
+        return Estimator.estimate_accurate(
+            page_accesses,
+            t_ddr,
+            t_hbm,
+            hbm_intervals,
+            hbm_factor,
+        )
 
     def estimate(self, hbm_intervals, hbm_factor=1.0):
         """

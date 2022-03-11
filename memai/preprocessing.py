@@ -59,8 +59,9 @@ class Preprocessing:
     def _append_window_(self, window):
         if window.is_empty():
             self._append_(
-                self.observation_space.empty(), [], [], window.t_ddr, window.t_hbm
+                self.observation_space.empty(), [], [], window.t_ddr, window.t_ddr
             )
+            self._window_index += 1
             return
 
         window_pages = window.addresses & self.intervals.page_mask
@@ -71,12 +72,12 @@ class Preprocessing:
             if not any(indexes):
                 continue
 
+            is_empty = False
             addr = window.addresses[indexes]
             timestamps = window.traces.trace_ddr[Trace.TIMESTAMP][indexes]
             page, count = np.unique(addr & self.intervals.page_mask, return_counts=True)
             observation = self.observation_space.from_sparse_matrix(timestamps, addr)
             self._append_(observation, page, count, window.t_ddr, window.t_hbm)
-
         self._window_index += 1
 
     def as_dict(self):
@@ -156,7 +157,7 @@ class Preprocessing:
         pre.t_ddr = df[Preprocessing.TIME_DDR].values
         pre.t_hbm = df[Preprocessing.TIME_HBM].values
         pre.windows = df[Preprocessing.WINDOW].values
-        pre.intervals.append_addresses(np.unique(np.concatenate(pre.pages)))
+        # pre.intervals.append_addresses(np.unique(np.concatenate(pre.pages)))
         return pre
 
     @staticmethod
@@ -276,4 +277,4 @@ if __name__ == "__main__":
         observation_space,
     )
     print("Export processed traces to: {}".format(output))
-    df = pret.as_pandas(output)
+    df = pre.as_pandas(output)

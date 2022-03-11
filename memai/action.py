@@ -53,6 +53,8 @@ class NeighborActionSpace(DefaultActionSpace):
 
     def do_action(self, actions, hbm_intervals, *args):
         observation, pages, count, t_ddr, t_hbm = args
+        if len(pages) == 0:
+            return 0
 
         begin_index = np.nanmin(pages) >> self._page_shift
         end_index = np.nanmax(pages) >> self._page_shift
