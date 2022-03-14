@@ -30,6 +30,38 @@ def add_traces_input_args(parser):
     )
 
 
+def add_env_args(parser):
+    parser.add_argument(
+        "--input",
+        metavar="<file.feather>",
+        required=True,
+        type=str,
+        help="A preprocessed trace obtained with the script preprocessing.py."
+        "Observations shape must match the shape of observations in the trace.",
+    )
+    parser.add_argument(
+        "--num-actions",
+        metavar="<int>",
+        default=128,
+        type=int,
+        help="The number of possible actions.",
+    )
+    parser.add_argument(
+        "--move-page-cost",
+        metavar="<float>",
+        default=0.01,
+        type=float,
+        help="The cost of moving a page in milliseconds.",
+    )
+    parser.add_argument(
+        "--hbm-size",
+        metavar="<int>",
+        default=1 << 14,
+        type=int,
+        help="The size of the HBM memory in MiBytes",
+    )
+
+
 def add_window_args(parser):
     parser.add_argument(
         "--window-len",

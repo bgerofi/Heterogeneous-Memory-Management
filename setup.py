@@ -9,14 +9,35 @@ setup(
     url="https://github.com/bgerofi/Heterogeneous-Memory-Management",
     license="MIT",
     requires=[
+        # For the pebs trace environment implementation
+        "gym(==0.21.0)",
+        # For building placement models.
+        "pfrl(==0.3.0)",
+        # For quick computations on arrays of data.
         "numpy(==1.22.0)",
+        # For building page tables and tracking contiguous memory chunks
         "intervaltree(==3.1.0)",
+        # For reading PEBS traces and exporting preprocessed traces.
         "pandas(==1.3.5)",
-        "tqdm(==4.62.3)"
+        # To show progress on preprocessing and training.
+        "tqdm(==4.62.3)",
     ],
     packages=["memai"],
-    scripts=["memai/estimator.py"],
+    scripts=[
+        # For testing estimations for different mappings and evaluate estimator
+        # runtime overhead.
+        "memai/estimator.py",
+        # To preprrocess PEBS traces into AI input.
+        "memai/preprocessing.py",
+        # To run a gym environment with dummy actions and evaluate runtime
+        # overhead of runing the environment compared to executing the
+        # application.
+        "memai/env.py",
+        # To train and evaluate AI models.
+        "memai/env.py",
+    ],
     package_data={
+        # Traces obtained from applications run.
         "memai": [
             "data/lammps-7-12-2016/src/USER-INTEL/TEST/*.feather",
             "data/lulesh2.0.2/*.feather",

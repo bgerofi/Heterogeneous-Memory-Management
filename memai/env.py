@@ -11,7 +11,7 @@ from intervaltree import IntervalTree
 import tqdm
 
 
-class TraceEnv(Env):
+class GymEnv(Env):
     def __init__(
         self,
         preprocessed_file,
@@ -38,6 +38,9 @@ class TraceEnv(Env):
         )
         self.progress_bar = tqdm.tqdm()
         self._reset()
+
+    def __len__(self):
+        return len(self._preprocessing)
 
     def _reset(self):
         self._hbm_intervals = IntervalTree()
@@ -147,11 +150,10 @@ class TraceEnv(Env):
         return_info=False,
         options=None,
     ):
-        super().reset(seed=seed)
         self._reset()
         try:
             # The void action when the hbm is empty.
-            action = np.zeros(self.action_space.n, dtype=self.action_space.dtype)
+            action = np.zeros(self.action_space.shape[0], dtype=self.action_space.dtype)
             obs, _, _, _ = self.step(action)
             return obs
         except StopIteration:
@@ -181,40 +183,10 @@ class TraceEnv(Env):
 if __name__ == "__main__":
     import argparse
     import time
-    import tracemalloc
     from memai.options import *
 
     parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "--input",
-        metavar="<file.feather>",
-        required=True,
-        type=str,
-        help="A preprocessed trace obtained with the script preprocessing.py."
-        "Observations shape must match the shape of observations in the trace.",
-    )
-    parser.add_argument(
-        "--num-actions",
-        metavar="<int>",
-        default=128,
-        type=int,
-        help="The number of possible actions.",
-    )
-    parser.add_argument(
-        "--move-page-cost",
-        metavar="<float>",
-        default=0.01,
-        type=float,
-        help="The cost of moving a page in milliseconds.",
-    )
-    parser.add_argument(
-        "--hbm-size",
-        metavar="<int>",
-        default=1 << 14,
-        type=int,
-        help="The size of the HBM memory in MiBytes",
-    )
+    add_env_args(parser)
 
     actions = ["random", "all_hbm", "all_ddr"]
     parser.add_argument(
@@ -228,7 +200,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    env = TraceEnv(
+    env = GymEnv(
         args.input,
         args.num_actions,
         args.move_page_cost,
