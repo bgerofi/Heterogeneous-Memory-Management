@@ -126,7 +126,7 @@ env = GymEnv(
     args.hbm_size << 20,
 )
 
-agent = make_DoubleDQN_agent(env, args.num_actions.args.gpu)
+agent = make_DoubleDQN_agent(env, args.num_actions, args.gpu)
 
 if args.model_dir is not None:
     try:
