@@ -32,14 +32,6 @@ def add_traces_input_args(parser):
 
 def add_env_args(parser):
     parser.add_argument(
-        "--input",
-        metavar="<file.feather>",
-        required=True,
-        type=str,
-        help="A preprocessed trace obtained with the script preprocessing.py."
-        "Observations shape must match the shape of observations in the trace.",
-    )
-    parser.add_argument(
         "--num-actions",
         metavar="<int>",
         default=128,

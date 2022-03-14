@@ -116,32 +116,39 @@ parser.add_argument(
     type=str,
     help="Chose whether to train a model or to evaluate it.",
 )
+parser.add_argument(
+    "--input",
+    metavar="<file.feather>",
+    required=True,
+    type=str,
+    action="append",
+    help="A preprocessed trace obtained with the script preprocessing.py."
+    "Observations shape must match the shape of observations in the trace.",
+)
 
 args = parser.parse_args()
 
-env = GymEnv(
-    args.input,
-    args.num_actions,
-    args.move_page_cost,
-    args.hbm_size << 20,
-)
+for input_file in args.input:
+    env = GymEnv(
+        input_file,
+        args.num_actions,
+        args.move_page_cost,
+        args.hbm_size << 20,
+    )
 
-agent = make_DoubleDQN_agent(env, args.num_actions, args.gpu)
+    agent = make_DoubleDQN_agent(env, args.num_actions, args.gpu)
 
-if args.model_dir is not None:
-    try:
-        agent.load(args.model_dir)
-        if args.action == "train":
-            print("Continue training existing model.")
-    except FileNotFoundError as e:
-        if args.action == "eval":
-            raise e
-        print("Training model from scratch.")
+    if args.model_dir is not None:
+        try:
+            agent.load(args.model_dir)
+        except FileNotFoundError as e:
+            if args.action == "eval":
+                raise e
 
-if args.action == "train":
-    train(env, agent)
-elif args.action == "eval":
-    evaluate(env, agent)
+    if args.action == "train":
+        train(env, agent)
+    elif args.action == "eval":
+        evaluate(env, agent)
 
-if args.model_dir is not None:
-    agent.save(args.model_dir)
+    if args.model_dir is not None:
+        agent.save(args.model_dir)

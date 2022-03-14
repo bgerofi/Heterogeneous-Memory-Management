@@ -64,6 +64,7 @@ class GymEnv(Env):
         return sum((v[1] for v in self._estimated_times.values()))
 
     def step(self, action):
+        reward = 0
         try:
             # Do action (move pages) and retrieve move pages penalty.
             if self._previous_input is not None:
@@ -74,6 +75,7 @@ class GymEnv(Env):
                 )
             else:
                 move_pages_time = 0
+            reward -= 1.0 * move_pages_time
 
             # Get next window, associated observations and estimation.
             observation, pages, count, t_ddr, t_hbm, i = next(self._iterator)
@@ -97,7 +99,7 @@ class GymEnv(Env):
             # window.
             except KeyError:
                 if i > 0:  # skip first iteration.
-                    self._estimate_window()
+                    reward += self._estimate_window()
                 # Initialize new window.
                 # t_ddr, t_hbm and hbm mappings are not updated with other
                 # observations of the same window since they all share the same.
@@ -116,18 +118,12 @@ class GymEnv(Env):
             self._previous_input = (observation, pages, count, t_ddr, t_hbm)
 
             # The reward is negative for moving pages (we want to avoid that)
-            reward = -1.0 * move_pages_time
             stop = False
             self.progress_bar.update(1)
 
         except StopIteration:
             # Don't forget to estimate last window.
-            self._estimate_window()
-            # Sum all estimations into the total estimated execution time.
-            estimated_time = sum((v[0] for v in self._estimated_times.values()))
-            # The reward is negative for the total elapsed time
-            # (we want to minimize elapsed time).
-            reward = -1.0 * self.estimated_time
+            reward += self._estimate_window()
             stop = True
             observation = None
             self.progress_bar.update(len(self._preprocessing))
@@ -142,6 +138,7 @@ class GymEnv(Env):
             list(zip(pages, count)), t_ddr, t_hbm, intervals
         )
         self._estimated_times[i] = (t_ddr, t_hbm, estimated_time)
+        return max([t_ddr, t_hbm]) - estimated_time
 
     def reset(
         self,
@@ -188,6 +185,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     add_env_args(parser)
 
+    parser.add_argument(
+        "--input",
+        metavar="<file.feather>",
+        required=True,
+        type=str,
+        help="A preprocessed trace obtained with the script preprocessing.py."
+        "Observations shape must match the shape of observations in the trace.",
+    )
     actions = ["random", "all_hbm", "all_ddr"]
     parser.add_argument(
         "--action",
