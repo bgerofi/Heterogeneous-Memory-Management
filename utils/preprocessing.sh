@@ -6,12 +6,13 @@ COMPARE_UNIT="ms"
 INTERVAL_DISTANCE=23
 OBSERVATION_ROWS=128
 OBSERVATION_COLUMNS=128
-INPUTS=("data/lulesh2.0.2/DRAM-lulesh2.0-PEBS-countdown-8-PEBS-buffer-4096-CPU-0.feather:data/lulesh2.0.2/MCDRAM-lulesh2.0-PEBS-countdown-8-PEBS-buffer-4096-CPU-0.feather" \
+INPUTS=(\
+				"data/lulesh2.0.2/DRAM-lulesh2.0-PEBS-countdown-8-PEBS-buffer-4096-CPU-0.feather:data/lulesh2.0.2/MCDRAM-lulesh2.0-PEBS-countdown-8-PEBS-buffer-4096-CPU-0.feather" \
 	    "data/lulesh2.0.2/sparse_phased/DRAM-lulesh2.0-PEBS-countdown-8-PEBS-buffer-4096-CPU-0.feather:data/lulesh2.0.2/sparse_phased/MCDRAM-lulesh2.0-PEBS-countdown-8-PEBS-buffer-4096-CPU-0.feather" \
 	    "data/lulesh2.0.2/sparse_phased_2/DRAM-lulesh2.0-PEBS-countdown-8-PEBS-buffer-4096-CPU-0.feather:data/lulesh2.0.2/sparse_phased_2/MCDRAM-lulesh2.0-PEBS-countdown-8-PEBS-buffer-4096-CPU-0.feather" \
 	    "data/nekbone-2.3.4/test/example1/DRAM-nekbone-PEBS-countdown-8-PEBS-buffer-4096-CPU-0.feather:data/nekbone-2.3.4/test/example1/MCDRAM-nekbone-PEBS-countdown-8-PEBS-buffer-4096-CPU-0.feather" \
 	    "data/lammps-7-12-2016/src/USER-INTEL/TEST/DRAM-lammps-PEBS-countdown-8-PEBS-buffer-4096-CPU-0.feather:data/lammps-7-12-2016/src/USER-INTEL/TEST/MCDRAM-lammps-PEBS-countdown-8-PEBS-buffer-4096-CPU-0.feather" \
-	    "data/miniFE/miniFE-2.0.1_openmp_opt/miniFE_openmp_opt/MCDRAM-miniFE.x-PEBS-countdown-8-PEBS-buffer-4096.feather:data/miniFE/miniFE-2.0.1_openmp_opt/miniFE_openmp_opt/DRAM-miniFE.x-PEBS-countdown-8-PEBS-buffer-4096.feather"
+	    "data/miniFE/miniFE-2.0.1_openmp_opt/miniFE_openmp_opt/DRAM-miniFE.x-PEBS-countdown-8-PEBS-buffer-4096.feather:data/miniFE/miniFE-2.0.1_openmp_opt/miniFE_openmp_opt/MCDRAM-miniFE.x-PEBS-countdown-8-PEBS-buffer-4096.feather"
        )
 
 

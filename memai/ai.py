@@ -105,7 +105,7 @@ parser.add_argument(
 parser.add_argument(
     "--model-dir",
     metavar="<path>",
-    default=None,
+    default="data/model",
     type=str,
     help="The directory where to load and save a trained model.",
 )

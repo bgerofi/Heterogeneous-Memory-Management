@@ -13,6 +13,8 @@ setup(
         "gym(==0.21.0)",
         # For building placement models.
         "pfrl(==0.3.0)",
+        # Pinned dependency for pfrl.
+        "pytorch(==1.8.2)",
         # For quick computations on arrays of data.
         "numpy(==1.22.0)",
         # For building page tables and tracking contiguous memory chunks
