@@ -82,6 +82,9 @@ class NeighborActionSpace(DefaultActionSpace):
 
         for p in add_pages:
             hbm_intervals.addi(p, p + chunk_size)
-        hbm_intervals.merge_overlaps(strict=False)
+
+        # Critical optimization here. 1<<12 has been chosen empirically.
+        if len(hbm_intervals) > 1<<12:
+            hbm_intervals.merge_overlaps(strict=False)
 
         return (len(add_pages) + len(remove_pages)) * self._move_page_cost
