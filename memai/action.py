@@ -83,8 +83,8 @@ class NeighborActionSpace(DefaultActionSpace):
         ]
         add_pages = [Interval(p, p + chunk_size) for a, p in zip(actions, pages) if a]
 
-        free_size = memory.free(rm_pages, report=True)
-        alloc_size = memory.alloc(add_pages, report=True)
+        free_size = memory.free(rm_pages)
+        alloc_size = memory.alloc(add_pages)
 
         n_free_pages = free_size >> self._page_shift
         n_alloc_pages = alloc_size >> self._page_shift

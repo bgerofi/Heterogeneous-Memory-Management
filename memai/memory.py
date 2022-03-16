@@ -20,7 +20,7 @@ class Memory:
         self.capacity_overflow_size = 0
 
     def report(self):
-        s = "Chunks Moves Summary:\n"
+        s = "Allocation/Free Summary:\n"
         s += "\tTotal Successful Allocation: {:.1f} (MB)\n".format(
             self.alloc_size / 1e6
         )
@@ -49,21 +49,15 @@ class Memory:
     def __contains__(self, item):
         return item in self._chunks
 
-    def alloc(self, address_intervals, report=False):
+    def alloc(self, address_intervals):
         # Create an interval tree of adjacent chunks to allocate.
         data = IntervalTree(address_intervals)
         data.merge_overlaps(strict=False)
-        if report:
-            total_size = interval_tree_size(data)
-        else:
-            total_size = 0
+        total_size = interval_tree_size(data)
 
         # Trim chunks to allocate to remove those already allocated.
         data.difference_update(self._chunks)
-        if report:
-            new_size = interval_tree_size(data)
-        else:
-            new_size = 0
+        new_size = interval_tree_size(data)
 
         # Compute remaining size memory and add only intervals that fits in it.
         if len(data) > 0:
@@ -89,15 +83,11 @@ class Memory:
 
         return fit_size
 
-    def free(self, address_intervals, report=False):
+    def free(self, address_intervals):
         # Create an interval tree of adjacent chunks to allocate.
         data = IntervalTree(address_intervals)
         data.merge_overlaps(strict=False)
-
-        if report:
-            total_size = interval_tree_size(data)
-        else:
-            total_size = 0
+        total_size = interval_tree_size(data)
 
         # Trim chunks to remove to avoid acounting for those already not allocated.
         data.intersection_update(self._chunks)
