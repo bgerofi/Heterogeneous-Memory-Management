@@ -82,15 +82,6 @@ def evaluate(env, agent):
             agent.observe(obs, r, done, reset)
             if done or reset:
                 break
-    simulated_time = env.estimated_time + env.move_pages_time
-
-    print("Time DDR: {:.2f} ({})".format(env.t_ddr, env._compare_unit))
-    print("Time HBM: {:.2f} ({})".format(env.t_hbm, env._compare_unit))
-    print("Simulated Time: {:.2f} ({})".format(simulated_time, env._compare_unit))
-    print("\tEstimated Time: {:.2f} ({})".format(env.estimated_time, env._compare_unit))
-    print(
-        "\tMove Pages Time: {:.2f} ({})".format(env.move_pages_time, env._compare_unit)
-    )
 
 
 parser = argparse.ArgumentParser()
@@ -149,6 +140,7 @@ for input_file in args.input:
         train(env, agent)
     elif args.action == "eval":
         evaluate(env, agent)
+        env.render()
 
     if args.model_dir is not None:
         agent.save(args.model_dir)

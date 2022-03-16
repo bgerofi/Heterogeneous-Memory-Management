@@ -1,5 +1,6 @@
 from memai import (
     Estimator,
+    Memory,
     WindowObservationSpace,
     NeighborActionSpace,
     Preprocessing,
@@ -27,7 +28,6 @@ class GymEnv(Env):
             num_actions,
             move_page_cost,
             preprocess_args["page_size"],
-            hbm_size,
         )
         self._compare_unit = preprocess_args["compare_unit"]
         self._preprocessing = Preprocessing.from_pandas(
@@ -36,6 +36,7 @@ class GymEnv(Env):
             preprocess_args["interval_distance"],
             preprocess_args["observation_space"],
         )
+        self._hbm_memory = Memory(hbm_size)
         self.progress_bar = tqdm.tqdm()
         self._reset()
 
@@ -43,7 +44,7 @@ class GymEnv(Env):
         return len(self._preprocessing)
 
     def _reset(self):
-        self._hbm_intervals = IntervalTree()
+        self._hbm_memory.empty()
         self._estimated_times = {}
         self._window_index = 0
         self.move_pages_time = 0.0
@@ -70,7 +71,7 @@ class GymEnv(Env):
             if self._previous_input is not None:
                 move_pages_time = self.action_space.do_action(
                     action,
-                    self._hbm_intervals,
+                    self._hbm_memory,
                     *self._previous_input,
                 )
             else:
@@ -81,7 +82,7 @@ class GymEnv(Env):
             observation, pages, count, t_ddr, t_hbm, i = next(self._iterator)
             pages_access = list(zip(pages, count))
             estimated_time = Estimator.estimate_window(
-                pages_access, t_ddr, t_hbm, self._hbm_intervals
+                pages_access, t_ddr, t_hbm, self._hbm_memory._chunks
             )
 
             self.move_pages_time += move_pages_time
@@ -112,7 +113,7 @@ class GymEnv(Env):
                     t_hbm,
                     pages,
                     count,
-                    self._hbm_intervals.copy(),
+                    self._hbm_memory._chunks.copy(),
                 ]
                 self._window_index = i
             self._previous_input = (observation, pages, count, t_ddr, t_hbm)
@@ -157,17 +158,20 @@ class GymEnv(Env):
             return None
 
     def render(self, mode="human"):
-
-        s = "{:8g}({}) {:8g}({}) {:8g}({}) {:8g}({})".format(
-            self.t_hbm,
-            self._compare_unit,
-            self.estimated_time,
-            self._compare_unit,
-            self.move_pages_time,
-            self._compare_unit,
-            self.t_ddr,
-            self._compare_unit,
+        s = self._hbm_memory.report()
+        s += "Simulated Time Summary:\n"
+        s += "\tTotal Simulated Time: {:.2f} ({})\n".format(
+            self.estimated_time + self.move_pages_time, self._compare_unit
         )
+        s += "\tApplication Memory Access Time: {:.2f} ({})\n".format(
+            self.estimated_time, self._compare_unit
+        )
+        s += "\tRuntime Move Pages Time: {:.2f} ({})\n".format(
+            self.move_pages_time, self._compare_unit
+        )
+        s += "Real Execution Time Summary:\n"
+        s += "\tTime DDR: {:.2f} ({})\n".format(self.t_ddr, self._compare_unit)
+        s += "\tTime HBM: {:.2f} ({})\n".format(self.t_hbm, self._compare_unit)
 
         if mode == "ansi":
             return s
@@ -223,13 +227,6 @@ if __name__ == "__main__":
             action = env.action_space.all_to_ddr_action()
         observation, reward, stop, debug_info = env.step(action)
     simulation_time = time.time() - t
-    simulated_time = env.estimated_time + env.move_pages_time
 
-    print("Time DDR: {:.2f} ({})".format(env.t_ddr, env._compare_unit))
-    print("Time HBM: {:.2f} ({})".format(env.t_hbm, env._compare_unit))
-    print("Simulated Time: {:.2f} ({})".format(simulated_time, env._compare_unit))
-    print("\tEstimated Time: {:.2f} ({})".format(env.estimated_time, env._compare_unit))
-    print(
-        "\tMove Pages Time: {:.2f} ({})".format(env.move_pages_time, env._compare_unit)
-    )
+    env.render()
     print("Simulation Time: {:.2f} (s)".format(simulation_time))

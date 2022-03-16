@@ -9,7 +9,6 @@ class DefaultActionSpace(Space):
         num_actions,
         move_page_cost=10,
         page_size=1 << 14,
-        hbm_size=np.iinfo(np.int64).max,
         seed=None,
     ):
         super().__init__([num_actions], np.uint8, seed)
@@ -17,12 +16,8 @@ class DefaultActionSpace(Space):
         self._page_size = page_size
         self._page_shift = int(np.round(np.log2(1 << 14)))
         self._page_mask = ~(page_size - 1)
-        self._hbm_size = hbm_size
 
-    def remaining_size(self, hbm_intervals):
-        return self._hbm_size - sum([i.end - i.begin for i in hbm_intervals])
-
-    def do_action(self, action, hbm_intervals, *args):
+    def do_action(self, action, memory, *args):
         return 0
 
     def all_to_hbm_action(self):
@@ -55,7 +50,7 @@ class NeighborActionSpace(DefaultActionSpace):
 
         return begin, end
 
-    def do_action(self, actions, hbm_intervals, *args):
+    def do_action(self, actions, memory, *args):
         observation, pages, count, t_ddr, t_hbm = args
         if len(pages) == 0:
             return 0
@@ -83,41 +78,15 @@ class NeighborActionSpace(DefaultActionSpace):
 
         # Prepare new pages that will be added to hbm intervals. We only keep pages
         # That are not already in hbm intervals.
-        add_pages = [Interval(p, p + chunk_size) for a, p in zip(actions, pages) if a]
-        add_pages = IntervalTree(add_pages)
-        add_pages.merge_overlaps(strict=False)
-        add_pages.difference_update(hbm_intervals)
-
-        # Remove selected pages from hbm intervals.
         rm_pages = [
             Interval(p, p + chunk_size) for a, p in zip(actions, pages) if not a
         ]
-        rm_pages = IntervalTree(rm_pages)
-        rm_pages.merge_overlaps(strict=False)
-        rm_pages.intersection_update(hbm_intervals)
-        hbm_intervals.difference_update(rm_pages)
+        add_pages = [Interval(p, p + chunk_size) for a, p in zip(actions, pages) if a]
 
-        # Compute remaining size of hbm memory and add only intervals that fits in it.
-        if len(add_pages) > 0:
-            available_size = self.remaining_size(hbm_intervals)
-            add_size = np.cumsum([i.end - i.begin for i in add_pages])
-            stop_index = next(
-                (i for i, s in enumerate(add_size) if s > available_size), -1
-            )
-            if stop_index > 0:
-                add_pages = [i for i in add_pages][:stop_index]
-                add_size = add_size[stop_index - 1]
-                hbm_intervals.update(add_pages)
-            elif stop_index == -1:
-                add_size = add_size[-1]
-                hbm_intervals.update(add_pages)
-            else:
-                add_pages = []
-                add_size = 0
+        free_size = memory.free(rm_pages, report=True)
+        alloc_size = memory.alloc(add_pages, report=True)
 
-        # Critical optimization here. 1<<12 has been chosen empirically.
-        if len(add_pages) > 0 and len(hbm_intervals) > (1 << 12):
-            hbm_intervals.merge_overlaps(strict=False)
+        n_free_pages = free_size >> self._page_shift
+        n_alloc_pages = alloc_size >> self._page_shift
 
-        add_size = sum((i.end - i.begin) for i in add_pages)
-        return (len(add_pages) + len(rm_pages)) * self._move_page_cost
+        return self._move_page_cost * (n_free_pages + n_alloc_pages)
