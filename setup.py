@@ -36,7 +36,7 @@ setup(
         # application.
         "memai/env.py",
         # To train and evaluate AI models.
-        "memai/env.py",
+        "memai/ai.py",
     ],
     package_data={
         # Traces obtained from applications run.
