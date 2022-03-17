@@ -105,7 +105,7 @@ parser.add_argument(
     metavar="ACTION",
     choices=["train", "eval"],
     type=str,
-    help="Chose whether to train a model or to evaluate it.",
+    help="Chose whether to 'train' a model or to 'eval' (evaluuate) a model.",
 )
 parser.add_argument(
     "--input",
