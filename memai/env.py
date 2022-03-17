@@ -76,7 +76,7 @@ class GymEnv(Env):
                 )
             else:
                 move_pages_time = 0
-            reward -= 1.0 * move_pages_time
+            reward -= move_pages_time
 
             # Get next window, associated observations and estimation.
             observation, pages, count, t_ddr, t_hbm, i = next(self._iterator)
