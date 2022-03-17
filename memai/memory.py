@@ -75,7 +75,7 @@ class Memory:
 
         # Critical optimization here. 1<<12 has been chosen empirically.
         if len(data) > 0 and len(self._chunks) > self._merge_overlap_threshold:
-            self._chunks(strict=False)
+            self._chunks.merge_overlaps(strict=False)
 
         self.alloc_size += fit_size
         self.capacity_overflow_size += new_size - fit_size
