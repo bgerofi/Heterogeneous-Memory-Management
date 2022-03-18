@@ -76,7 +76,9 @@ class Preprocessing:
             addr = window.addresses[indexes]
             timestamps = window.traces.trace_ddr[Trace.TIMESTAMP][indexes]
             page, count = np.unique(addr & self.intervals.page_mask, return_counts=True)
-            observation = self.observation_space.from_sparse_matrix(timestamps, addr)
+            observation = self.observation_space.from_sparse_matrix(
+                timestamps, addr >> self.intervals.page_shift
+            )
             self._append_(observation, page, count, window.t_ddr, window.t_hbm)
         self._window_index += 1
 

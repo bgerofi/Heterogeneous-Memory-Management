@@ -17,6 +17,8 @@ setup(
         "pytorch(==1.8.2)",
         # For quick computations on arrays of data.
         "numpy(==1.22.0)",
+        # For observations processing
+        "scipy(==1.8.0)",
         # For building page tables and tracking contiguous memory chunks
         "intervaltree(==3.1.0)",
         # For reading PEBS traces and exporting preprocessed traces.
