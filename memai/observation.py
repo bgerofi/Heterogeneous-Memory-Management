@@ -83,8 +83,16 @@ class TestObservationSpace(unittest.TestCase):
 
     def test_scale_down(self):
         observation_space = WindowObservationSpace(2, 2)
-        input_mat = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
-        check_mat = np.array([[2, 0], [0, 2]])
+        input_mat = np.array([
+            [1, 0, 0, 0],
+            [0, 1, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ])
+        check_mat = np.array([
+            [2, 0],
+            [0, 2]
+        ])
         output_mat = observation_space.from_sparse_matrix(
             *TestObservationSpace.mat_to_coord(input_mat)
         )
@@ -92,8 +100,15 @@ class TestObservationSpace(unittest.TestCase):
 
         ##############################
 
-        input_mat = np.array([[0, 0, 1], [0, 1, 0], [1, 0, 0]])
-        check_mat = np.array([[1, 1], [1, 0]])
+        input_mat = np.array([
+            [0, 0, 1],
+            [0, 1, 0],
+            [1, 0, 0]
+        ])
+        check_mat = np.array([
+            [1, 1],
+            [1, 0]
+        ])
         output_mat = observation_space.from_sparse_matrix(
             *TestObservationSpace.mat_to_coord(input_mat)
         )
@@ -112,7 +127,12 @@ class TestObservationSpace(unittest.TestCase):
                 [1, 0, 0, 0, 0, 0],
             ]
         )
-        check_mat = np.array([[0, 0, 0, 1], [0, 0, 2, 0], [0, 2, 0, 0], [1, 0, 0, 0]])
+        check_mat = np.array([
+            [0, 0, 0, 1],
+            [0, 0, 2, 0],
+            [0, 2, 0, 0],
+            [1, 0, 0, 0]
+        ])
         output_mat = observation_space.from_sparse_matrix(
             *TestObservationSpace.mat_to_coord(input_mat)
         )
@@ -131,7 +151,12 @@ class TestObservationSpace(unittest.TestCase):
                 [1, 0, 0, 0, 0, 0, 0],
             ]
         )
-        check_mat = np.array([[0, 0, 1, 1], [0, 0, 1, 0], [1, 1, 1, 0], [1, 0, 0, 0]])
+        check_mat = np.array([
+            [0, 0, 1, 1],
+            [0, 0, 1, 0],
+            [1, 1, 1, 0],
+            [1, 0, 0, 0]
+        ])
         output_mat = observation_space.from_sparse_matrix(
             *TestObservationSpace.mat_to_coord(input_mat)
         )
@@ -139,8 +164,16 @@ class TestObservationSpace(unittest.TestCase):
 
     def test_scale_up(self):
         observation_space = WindowObservationSpace(4, 4)
-        input_mat = np.array([[0, 1], [1, 0]])
-        check_mat = np.array([[0, 0, 0, 1], [0, 0, 0, 0], [0, 0, 0, 0], [1, 0, 0, 0]])
+        input_mat = np.array([
+            [0, 1],
+            [1, 0]
+        ])
+        check_mat = np.array([
+            [0, 0, 0, 1],
+            [0, 0, 0, 0],
+            [0, 0, 0, 0],
+            [1, 0, 0, 0]
+        ])
         output_mat = observation_space.from_sparse_matrix(
             *TestObservationSpace.mat_to_coord(input_mat)
         )
@@ -148,8 +181,17 @@ class TestObservationSpace(unittest.TestCase):
 
         ##############################
 
-        input_mat = np.array([[0, 0, 1], [0, 1, 0], [1, 0, 0]])
-        check_mat = np.array([[0, 0, 0, 1], [0, 0, 0, 0], [0, 0, 1, 0], [1, 0, 0, 0]])
+        input_mat = np.array([
+            [0, 0, 1],
+            [0, 1, 0],
+            [1, 0, 0]
+        ])
+        check_mat = np.array([
+            [0, 0, 0, 1],
+            [0, 0, 0, 0],
+            [0, 0, 1, 0],
+            [1, 0, 0, 0]
+        ])
         output_mat = observation_space.from_sparse_matrix(
             *TestObservationSpace.mat_to_coord(input_mat)
         )
