@@ -28,11 +28,6 @@ class Trace:
         if Trace.PHASE not in data.columns:
             data = data.assign(Phase=0)
 
-        # Make instructions as an increasing number.
-        data = data.assign(
-            Instrs=np.cumsum(data.Instrs.values), Index=list(range(len(data)))
-        )
-
         self._data_ = data
         self.filename = filename
 
@@ -297,15 +292,17 @@ class WindowIterator:
         self._phases = iter(trace_set.trace_ddr.phases())
         self._windows = iter([])
         self._bounds_fn_, self._timestamp_fn_ = WindowIterator._parse_unit(compare_unit)
-        self._last_timestamp_ddr, te = self._bounds_fn_(trace_set.trace_ddr)
-        self._last_timestamp_hbm, _ = self._bounds_fn_(trace_set.trace_hbm)
+        self._last_timestamp_ddr, _ = Trace.time_range(trace_set.trace_ddr)
+        self._last_timestamp_hbm, _ = Trace.time_range(trace_set.trace_hbm)
+        self._previous_window_empty = False
 
         if window_length is None:
+            ts, te = self._bounds_fn_(trace_set.trace_ddr)
             num_phases = len(trace_set.trace_ddr.phases())
-            window_length = (te - self._last_timestamp_ddr) / num_phases
+            window_length = (te - ts) / num_phases
             window_length = window_length
             window_length = max(1, window_length)
-            widow_length = min(te - self._last_timestamp_ddr, window_length)
+            widow_length = min(te - ts, window_length)
         self._target_win_len = float(window_length)
 
     @staticmethod
@@ -336,59 +333,86 @@ class WindowIterator:
             phase = next(self._phases)
             trace_ddr = self._traces.trace_ddr.get_phases(phase)
             trace_hbm = self._traces.trace_hbm.get_phases(phase)
-            if len(trace_ddr) > 0:
+            if len(trace_ddr) > 0 or len(trace_hbm) > 0:
                 break
 
-        ddr_s = self._last_timestamp_ddr
-        hbm_s = self._last_timestamp_hbm
-        _, ddr_e = self._bounds_fn_(trace_ddr)
-        t_ddr = ddr_e - ddr_s
         try:
-            _, hbm_e = self._bounds_fn_(trace_hbm)
+            ddr_s, ddr_e = self._bounds_fn_(trace_ddr)
+            t_ddr = ddr_e - ddr_s
+        except IndexError:
+            t_ddr = 0
+        try:
+            hbm_s, hbm_e = self._bounds_fn_(trace_hbm)
             t_hbm = hbm_e - hbm_s
         except IndexError:
             t_hbm = 0
 
-        if t_ddr < self._target_win_len:
+        t_max = max(t_ddr, t_hbm)
+        if t_max < self._target_win_len:
             nr_win = 1
             win_len_ddr = t_ddr
             win_len_hbm = t_hbm
         else:
-            nr_win = int(t_ddr / self._target_win_len)
+            nr_win = int(t_max / self._target_win_len)
             win_len_ddr = t_ddr / nr_win
             win_len_hbm = t_hbm / nr_win
-        win_len_ddr = max(1, win_len_ddr)
 
         windows = []
-        while self._last_timestamp_ddr < ddr_e:
-            t_hbm_begin = self._last_timestamp_hbm
-            t_ddr_begin = self._last_timestamp_ddr
-            t_hbm_end = self._last_timestamp_hbm + win_len_hbm
-            t_ddr_end = self._last_timestamp_ddr + win_len_ddr
-            hbm_win = self.subset_window(trace_hbm, t_hbm_begin, t_hbm_end)
-            ddr_win = self.subset_window(trace_ddr, t_ddr_begin, t_ddr_end)
-
-            if len(hbm_win) > 0:
-                _, t_end = self._bounds_fn_(hbm_win)
-                t_hbm_end = max(t_hbm_end, t_end)
-                t_hbm_end = min(t_hbm_end, hbm_e)
-            if len(ddr_win) > 0:
-                _, t_end = self._bounds_fn_(ddr_win)
-                t_ddr_end = max(t_ddr_end, t_end)
-                t_ddr_end = min(t_ddr_end, ddr_e)
-
-            self._last_timestamp_hbm = t_hbm_end
-            self._last_timestamp_ddr = t_ddr_end
-
-            windows.append(
-                WindowItem(
-                    TraceSet(ddr_win, hbm_win),
-                    t_ddr_begin,
-                    t_ddr_end,
-                    t_hbm_begin,
-                    t_hbm_end,
+        for i in range(nr_win):
+            hbm_win = (
+                self.subset_window(
+                    trace_hbm, hbm_s + i * win_len_hbm, hbm_s + (1 + i) * win_len_hbm
                 )
+                if t_hbm > 0
+                else []
             )
+            ddr_win = (
+                self.subset_window(
+                    trace_ddr, ddr_s + i * win_len_ddr, ddr_s + (1 + i) * win_len_ddr
+                )
+                if t_ddr > 0
+                else []
+            )
+
+            if len(ddr_win) == 0 and len(hbm_win) == 0:
+                self._previous_window_empty = True
+                continue
+
+            try:
+                t_ddr_begin, t_ddr_end = Trace.time_range(ddr_win)
+            except Exception:
+                t_ddr_begin = self._last_timestamp_ddr
+                t_ddr_end = self._last_timestamp_ddr
+            try:
+                t_hbm_begin, t_hbm_end = Trace.time_range(hbm_win)
+            except Exception:
+                t_hbm_begin = self._last_timestamp_hbm
+                t_hbm_end = self._last_timestamp_hbm
+
+            if self._previous_window_empty:
+                window = WindowItem(
+                    [],
+                    self._last_timestamp_ddr,
+                    t_ddr_begin,
+                    self._last_timestamp_hbm,
+                    t_hbm_begin,
+                )
+                windows.append(window)
+                self._last_timestamp_ddr = t_ddr_begin
+                self._last_timestamp_hbm = t_hbm_begin
+
+            self._previous_window_empty = False
+            window = WindowItem(
+                TraceSet(ddr_win, hbm_win),
+                self._last_timestamp_ddr,
+                t_ddr_end,
+                self._last_timestamp_hbm,
+                t_hbm_end,
+            )
+            windows.append(window)
+            self._last_timestamp_ddr = t_ddr_end
+            self._last_timestamp_hbm = t_hbm_end
+
         self._windows = iter(windows)
 
         return next(self)

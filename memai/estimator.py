@@ -296,26 +296,25 @@ if __name__ == "__main__":
         traces, args.page_size, args.compare_unit, args.window_len, args.verbose
     )
     runtime, estimated_time = time_estimation(estimator, hbm_intervals, args.hbm_factor)
-    time_range_fn, _ = WindowIterator._parse_unit(args.compare_unit)
-    hbm_time = float(np.diff(list(time_range_fn(hbm_trace))))
-    ddr_time = float(np.diff(list(time_range_fn(ddr_trace))))
+    hbm_time = float(np.diff(list(Trace.time_range(hbm_trace))))
+    ddr_time = float(np.diff(list(Trace.time_range(ddr_trace))))
 
     if args.measured_input is not None:
         measured_trace = Trace(
             args.measured_input, args.cpu_cycles_per_ms, args.verbose
         )
-        measured_time = float(np.diff(list(time_range_fn(measured_trace))))
+        measured_time = float(np.diff(list(Trace.time_range(measured_trace))))
+        error = abs(1.0 - float(estimated_time) / float(measured_time))
     else:
         measured_time = 0
 
-    error = float(abs(estimated_time - measured_time)) / float(abs(ddr_time - hbm_time))
-    print("Time DDR: {:.2f} ({})".format(ddr_time, args.compare_unit))
-    print("Time HBM: {:.2f} ({})".format(hbm_time, args.compare_unit))
+    print("Time DDR: {:.2f} (ms)".format(ddr_time / 1e3))
+    print("Time HBM: {:.2f} (ms)".format(hbm_time / 1e3))
     if args.measured_input is not None:
-        print("Time Measured: {:.2f} ({})".format(measured_time, args.compare_unit))
-    print("Time Estimated: {:.2f} ({})".format(estimated_time, args.compare_unit))
+        print("Time Measured: {:.2f} (ms)".format(measured_time / 1e3))
+    print("Time Estimated: {:.2f} (ms)".format(estimated_time / 1e3))
     if args.measured_input is not None:
-        print("Estimation Relative Error: {:.2f}%".format(100.0 * error))
+        print("Estimation Error: {:.2f}%".format(error * 100.0))
     print("Estimator Runtime: {:.8f} (s)".format(runtime))
     if args.measured_input is not None:
         print("Estimator Speedup: {:.0f}".format(measured_time / (1000.0 * runtime)))
