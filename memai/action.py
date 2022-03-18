@@ -1,6 +1,7 @@
 from gym.spaces import Space
 import numpy as np
 from intervaltree import IntervalTree, Interval
+import unittest
 
 
 class DefaultActionSpace(Space):
@@ -39,49 +40,39 @@ class DefaultActionSpace(Space):
 
 class NeighborActionSpace(DefaultActionSpace):
     @staticmethod
-    def extend_and_center(begin, end, size):
-        extra = (end - begin) + size
-        extra_left = extra // 2
-        extra_right = extra - extra_left
+    def match_actions_pages(actions, pages):
+        page_min = np.nanmin(pages)
+        page_max = np.nanmax(pages)
+        size = page_max - page_min
 
-        begin = 0 if begin < extra_left else (begin - extra_left)
-        new_end = end + extra_right
-        end = np.iinfo(type(end)).max if new_end < end else new_end
+        page_min = 0 if page_min <= size else page_min - size
+        page_max = (
+            (page_max + size)
+            if (page_max + size) > page_max
+            else np.iinfo(type(page_max)).max
+        )
+        chunk_size = max(1, (page_max - page_min) // len(actions))
 
-        return begin, end
+        return zip(
+            actions,
+            ((p, p + chunk_size) for p in range(page_min, page_max, chunk_size)),
+        )
 
     def do_action(self, actions, memory, *args):
         observation, pages, count, t_ddr, t_hbm = args
         if len(pages) == 0:
             return 0
-
-        # Compute a range of chunk indexes of size: 3 * len(actions)
-        # around and centered on accessed pages.
-        begin_index = np.nanmin(pages) >> self._page_shift
-        end_index = np.nanmax(pages) >> self._page_shift
-        # Make sure there is at least len(actions) chunks.
-        index_range = max(end_index - begin_index, len(actions))
-        # Multiply by 3 for chunks before, into and after the range of accessed
-        # pages.
-        begin_index, end_index = NeighborActionSpace.extend_and_center(
-            begin_index, end_index, 3 * index_range
-        )
-        # Translate indexes back into pages address.
-        begin_page = begin_index << self._page_shift
-        end_page = end_index << self._page_shift
-        # Compute the size of each chunk from begin_page to end_page
-        # such that there is one chunk per action.
-        # Also make chunk_size a multiple of page_size to be sure to get addresses
-        # on a page boundary.
-        chunk_size = ((end_page - begin_page) // len(actions)) & self._page_mask
-        pages = range(begin_page, end_page + self._page_size, chunk_size)
-
-        # Prepare new pages that will be added to hbm intervals. We only keep pages
-        # That are not already in hbm intervals.
+        action_pages = NeighborActionSpace.match_actions_pages(actions, pages)
         rm_pages = [
-            Interval(p, p + chunk_size) for a, p in zip(actions, pages) if not a
+            Interval(begin & self._page_mask, end & self._page_mask)
+            for a, (begin, end) in action_pages
+            if not a
         ]
-        add_pages = [Interval(p, p + chunk_size) for a, p in zip(actions, pages) if a]
+        add_pages = [
+            Interval(begin & self._page_mask, end & self._page_mask)
+            for a, (begin, end) in actions_pages
+            if a
+        ]
 
         free_size = memory.free(rm_pages)
         alloc_size = memory.alloc(add_pages)
@@ -90,3 +81,22 @@ class NeighborActionSpace(DefaultActionSpace):
         n_alloc_pages = alloc_size >> self._page_shift
 
         return self._move_page_cost * (n_free_pages + n_alloc_pages)
+
+
+class TestNeighborActionSpace(unittest.TestCase):
+    def test_match_actions_pages(self):
+        actions = [1, 0, 1, 0, 0]
+        pages = [1, 2, 3]
+
+        check = [(1, (0, 1)), (0, (1, 2)), (1, (2, 3)), (0, (3, 4)), (0, (4, 5))]
+        result = NeighborActionSpace.match_actions_pages(actions, pages)
+        # Algorithm:
+        # size = 2, left = max(0, 1 - 2) = 0, right = 3 + 2 = 5
+        # chunk_size = max(1, (5 - 0) // 5) = 1
+        # range(left, right, chunk_size) = [ 0, 1, 2, 3, 4 ]
+        # chunks = [ (0, 1), (1, 2), (2, 3), (3, 4), (4, 5) ]
+        self.assertTrue(all([i == j for i, j in zip(check, result)]))
+
+
+if __name__ == "__main__":
+    unittest.main()
