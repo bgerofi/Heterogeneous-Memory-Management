@@ -1,5 +1,6 @@
 import numpy as np
 from intervaltree import IntervalTree, Interval
+from functools import reduce
 import unittest
 
 
@@ -9,27 +10,7 @@ class Memory:
     ):
         self.capacity = capacity
         self._merge_overlap_threshold = merge_overlap_threshold
-        self._chunks = IntervalTree()
-        self.alloc_size = 0
-        self.free_size = 0
-        self.double_alloc_size = 0
-        self.double_free_size = 0
-        self.capacity_overflow_size = 0
-
-    def report(self):
-        s = "Allocation/Free Summary:\n"
-        s += "\tTotal Successful Allocation: {:.1f} (MB)\n".format(
-            self.alloc_size / 1e6
-        )
-        s += "\tTotal Successful Free: {:.1f} (MB)\n".format(self.free_size / 1e6)
-        s += "\tDouble Allocations Size: {:.1f} (MB)\n".format(
-            self.double_alloc_size / 1e6
-        )
-        s += "\tCapacity Overflow Allocations Size: {:.1f} (MB)\n".format(
-            self.capacity_overflow_size / 1e6
-        )
-        s += "\tDouble Free Size: {:.1f} (MB)\n".format(self.double_free_size / 1e6)
-        return s
+        self.empty()
 
     def empty(self):
         self._chunks = IntervalTree()
@@ -46,60 +27,107 @@ class Memory:
     def __contains__(self, item):
         return item in self._chunks
 
-    def alloc(self, address_intervals):
+    def _update_(self, intervals):
+        self._chunks.update(intervals)
+        if len(self._chunks) > self._merge_overlap_threshold:
+            self._chunks.merge_overlaps(strict=False)
+
+    def report(self):
+        s = "Allocation/Free Summary:\n"
+        s += "\tTotal Successful Allocation: {:.1f} (MB)\n".format(
+            self.alloc_size / 1e6
+        )
+        s += "\tTotal Successful Free: {:.1f} (MB)\n".format(self.free_size / 1e6)
+        s += "\tDouble Allocations Size: {:.1f} (MB)\n".format(
+            self.double_alloc_size / 1e6
+        )
+        s += "\tCapacity Overflow Allocations Size: {:.1f} (MB)\n".format(
+            self.capacity_overflow_size / 1e6
+        )
+        s += "\tDouble Free Size: {:.1f} (MB)\n".format(self.double_free_size / 1e6)
+        return s
+
+    def fast_alloc(self, address_intervals):
+        """
+        Faster allocation method.
+        This method only loosely prevent capacity overflow.
+        Some allocations not overflowing may fail.
+        This method also does not keep track of double allocations, allocated size an overflowing size.
+        """
         # Merge overlaps of addresses to allocate.
         data = IntervalTree(address_intervals)
         data.merge_overlaps(strict=False)
 
-        alloc_size = 0
-        non_alloc_size = 0
-        overflow_size = 0
-        allocated_size = sum(i.length() for i in self._chunks)
-        available_size = self.capacity - allocated_size
+        available_size = self.capacity - sum(i.length() for i in self._chunks)
+        data = sorted(data, key=lambda i: i.length())
+        sizes = np.cumsum([i.length() for i in data])
 
-        for new_chunk in data:
-            if available_size <= 0:
-                return alloc_size
-            overlapping_intervals = sorted(self._chunks.overlap(new_chunk))
+        if sizes[-1] < available_size:
+            self._update_(data)
+            return sizes[-1]
 
-            if len(overlapping_intervals) == 0:
-                end = min(new_chunk.end, new_chunk.begin + available_size)
-                chunk = Interval(new_chunk.begin, end)
-                alloc_size += end - chunk.begin
-                overflow_size += new_chunk.end - end
-                available_size -= end - chunk.begin
-                self._chunks.add(chunk)
-                continue
+        cut = next(i for i, s in enumerate(sizes) if s > available_size)
+        data = data[: cut + 1]
+        data[-1] = Interval(
+            data[-1].begin, data[-1].begin + (available_size - sizes[cut - 1])
+        )
+        self._update_(data)
+        return available_size
 
-            non_alloc_size += sum(i.length() for i in overlapping_intervals)
+    def alloc(self, address_intervals):
+        """
+        This is an exact allocation method.
+        Input interval will be allocated as follow.
+        If some address ranges overlap already allocated address ranges, they
+        are not allocated and will be counted as a double allocation.
+        If their is too much data compared to capacity, the exceeding size
+        will be counted and the data which will be allocated is the first non
+        already allocated ranges (sorted by address) that fit in the memory.
+        """
 
-            if new_chunk.begin < overlapping_intervals[0].begin:
-                end = min(
-                    overlapping_intervals[0].begin, new_chunk.begin + available_size
-                )
-                chunk = Interval(new_chunk.begin, end)
-                size = end - chunk.begin
-                alloc_size += size
-                available_size -= size
-                overflow_size += new_chunk.end - chunk.end
-                non_alloc_size -= overlapping_intervals[0].end - new_chunk.end
-                self._chunks.add(chunk)
+        # Merge overlaps of addresses to allocate.
+        data = IntervalTree(address_intervals)
+        data.merge_overlaps(strict=False)
 
-            if overlapping_intervals[-1].end < new_chunk.end:
-                end = min(new_chunk.end, overlapping_intervals[-1].end + available_size)
-                chunk = Interval(overlapping_intervals[-1].end, end)
-                size = end - chunk.begin
-                overflow_size += new_chunk.end - chunk.end
-                non_alloc_size -= new_chunk.begin - overlapping_intervals[-1].begin
-                alloc_size += size
-                available_size -= size
-                self._chunks.add(chunk)
+        overlapping = IntervalTree(
+            reduce(
+                lambda a, b: a + b, (list(self._chunks.overlap(i)) for i in data), []
+            )
+        )
+        overlapping.merge_overlaps()
 
-        self._chunks.merge_overlaps(strict=False)
-        self.alloc_size += alloc_size
-        self.double_alloc_size += non_alloc_size
+        available_size = self.capacity - sum(i.length() for i in self._chunks)
+        total_size = sum(i.length() for i in data)
+        overlap_size = sum(i.length() for i in overlapping)
+        alloc_size = total_size - overlap_size
+        final_alloc_size = min(alloc_size, available_size)
+        overflow_size = abs(final_alloc_size - alloc_size)
+
+        self.alloc_size += final_alloc_size
+        self.double_alloc_size += overlap_size
         self.capacity_overflow_size += overflow_size
-        return alloc_size
+
+        if overflow_size == 0:
+            self._chunks.update(data)
+            self._chunks.merge_overlaps(strict=False)
+            return final_alloc_size
+
+        non_overlapping = self._chunks.copy()
+        non_overlapping.update(data)
+        non_overlapping.split_overlaps()
+        non_overlapping.difference_update(overlapping)
+        non_overlapping.difference_update(self._chunks)
+        non_overlapping = sorted(non_overlapping, key=lambda i: i.length())
+        sizes = np.cumsum([i.length() for i in non_overlapping])
+        cut = next(i for i, s in enumerate(sizes) if s > available_size)
+        non_overlapping = non_overlapping[: cut + 1]
+        non_overlapping[-1] = Interval(
+            non_overlapping[-1].begin,
+            non_overlapping[-1].begin + (available_size - sizes[cut - 1]),
+        )
+
+        self._update_(IntervalTree(non_overlapping))
+        return final_alloc_size
 
     def free(self, address_intervals):
         # Create an interval tree of adjacent chunks to allocate.
@@ -110,21 +138,33 @@ class Memory:
         non_free_size = 0
         for new_chunk in data:
             overlapping_intervals = sorted(self._chunks.overlap(new_chunk))
-            for i in overlapping_intervals:
-                free_size += i.length()
-                self._chunks.remove(i.begin, i.end)
 
-            if overlapping_intervals[0].begin < new_chunk.begin:
-                size = new_chunk.begin - overlapping_intervals[0].begin
-                free_size -= size
-                non_free_size += size
+            if len(overlapping_intervals) == 0:
+                non_free_size += new_chunk.length()
+                continue
+
+            for i in range(1, len(overlapping_intervals)):
+                free_size += overlapping_intervals[i].length()
+                non_free_size += (
+                    overlapping_intervals[i].begin - overlapping_intervals[i - 1].end
+                )
+                self._chunks.remove(overlapping_intervals[i])
+            self._chunks.remove(overlapping_intervals[0])
+            free_size += overlapping_intervals[0].length()
+
+            if new_chunk.begin <= overlapping_intervals[0].begin:
+                non_free_size += overlapping_intervals[0].begin - new_chunk.begin
+            else:
+                free_size -= overlapping_intervals[0].length()
+                free_size += overlapping_intervals[0].end - new_chunk.begin
                 self._chunks.add(
                     Interval(overlapping_intervals[0].begin, new_chunk.begin)
                 )
-            if overlapping_intervals[-1].end > new_chunk.end:
-                size = overlapping_intervals[-1].end - new_chunk.end
-                free_size -= size
-                non_free_size += size
+            if new_chunk.end >= overlapping_intervals[-1].end:
+                non_free_size += new_chunk.end - overlapping_intervals[-1].end
+            else:
+                free_size -= overlapping_intervals[-1].length()
+                free_size += new_chunk.end - overlapping_intervals[-1].begin
                 self._chunks.add(Interval(new_chunk.end, overlapping_intervals[-1].end))
 
         self.double_free_size += non_free_size
@@ -148,19 +188,33 @@ class TestMemory(unittest.TestCase):
         self.assertEqual(mem.occupancy, 2)
         self.assertEqual(mem.double_alloc_size, 2)
 
-        self.assertEqual(mem.alloc([Interval(2, 3)]), 1)
+        self.assertEqual(mem.alloc([Interval(3, 4)]), 1)
         self.assertEqual(mem.occupancy, 3)
 
         self.assertEqual(mem.alloc([Interval(2, 11)]), 7)
-        self.assertEqual(mem.occupancy, 10)
         self.assertEqual(mem.double_alloc_size, 3)
         self.assertEqual(mem.capacity_overflow_size, 1)
+        self.assertEqual(mem.occupancy, 10)
 
     def test_free(self):
-        pass
+        mem = Memory(10)
+        mem.alloc([Interval(0, 10)])
 
-    def test_combined(self):
-        pass
+        self.assertEqual(mem.free([Interval(10, 11)]), 0)
+        self.assertEqual(mem.free_size, 0)
+        self.assertEqual(mem.double_free_size, 1)
+
+        self.assertEqual(mem.free([Interval(4, 5)]), 1)
+        self.assertEqual(mem.free_size, 1)
+        self.assertEqual(mem.double_free_size, 1)
+
+        self.assertEqual(mem.free([Interval(3, 6)]), 2)
+        self.assertEqual(mem.free_size, 3)
+        self.assertEqual(mem.double_free_size, 2)
+
+        self.assertEqual(mem.free([Interval(8, 11)]), 2)
+        self.assertEqual(mem.free_size, 5)
+        self.assertEqual(mem.double_free_size, 3)
 
 
 if __name__ == "__main__":
