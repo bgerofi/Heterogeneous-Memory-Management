@@ -204,7 +204,7 @@ if __name__ == "__main__":
         default="random",
         type=str,
         choices=actions,
-        help="The cost of moving a page in milliseconds.",
+        help="The kind of action to execute: {}.".format(actions),
     )
 
     args = parser.parse_args()
