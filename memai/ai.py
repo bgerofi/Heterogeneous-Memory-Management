@@ -124,7 +124,7 @@ for input_file in args.input:
         input_file,
         args.num_actions,
         args.move_page_cost,
-        args.hbm_size << 20,
+        args.hbm_size,
     )
 
     agent = make_DoubleDQN_agent(env, args.num_actions, args.gpu)

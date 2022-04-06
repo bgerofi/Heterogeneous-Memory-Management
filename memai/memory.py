@@ -89,17 +89,16 @@ class Memory:
         data = IntervalTree(address_intervals)
         data.merge_overlaps(strict=False)
 
-        overlapping = IntervalTree(
-            reduce(
-                lambda a, b: a + b, (list(self._chunks.overlap(i)) for i in data), []
-            )
-        )
-        overlapping.merge_overlaps()
+        non_overlapping = self._chunks.copy()
+        non_overlapping.update(data)
+        non_overlapping.split_overlaps()
+        for i in self._chunks:
+            non_overlapping.remove_envelop(i.begin, i.end)
 
         available_size = self.capacity - sum(i.length() for i in self._chunks)
         total_size = sum(i.length() for i in data)
-        overlap_size = sum(i.length() for i in overlapping)
-        alloc_size = total_size - overlap_size
+        alloc_size = sum(i.length() for i in non_overlapping)
+        overlap_size = total_size - alloc_size
         final_alloc_size = min(alloc_size, available_size)
         overflow_size = abs(final_alloc_size - alloc_size)
 
@@ -107,23 +106,22 @@ class Memory:
         self.double_alloc_size += overlap_size
         self.capacity_overflow_size += overflow_size
 
+        if available_size <= 0:
+            return 0
+
         if overflow_size == 0:
             self._chunks.update(data)
             self._chunks.merge_overlaps(strict=False)
             return final_alloc_size
 
-        non_overlapping = self._chunks.copy()
-        non_overlapping.update(data)
-        non_overlapping.split_overlaps()
-        non_overlapping.difference_update(overlapping)
-        non_overlapping.difference_update(self._chunks)
         non_overlapping = sorted(non_overlapping, key=lambda i: i.length())
         sizes = np.cumsum([i.length() for i in non_overlapping])
         cut = next(i for i, s in enumerate(sizes) if s > available_size)
         non_overlapping = non_overlapping[: cut + 1]
+        length = available_size if cut == 0 else available_size - sizes[cut - 1]
         non_overlapping[-1] = Interval(
             non_overlapping[-1].begin,
-            non_overlapping[-1].begin + (available_size - sizes[cut - 1]),
+            non_overlapping[-1].begin + length,
         )
 
         self._update_(IntervalTree(non_overlapping))

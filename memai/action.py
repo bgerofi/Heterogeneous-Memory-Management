@@ -40,21 +40,17 @@ class DefaultActionSpace(Space):
 
 class NeighborActionSpace(DefaultActionSpace):
     @staticmethod
-    def match_actions_pages(actions, pages):
+    def match_actions_pages(actions, pages, addr_max=np.iinfo(np.uint64).max):
         page_min = np.nanmin(pages)
         page_max = np.nanmax(pages)
         size = page_max - page_min
 
         page_min = 0 if page_min <= size else page_min - size
-        page_max = (
-            (page_max + size)
-            if (page_max + size) > page_max
-            else np.iinfo(type(page_max)).max
-        )
+        page_max = addr_max if (addr_max - page_max) < size else page_max + size
         chunk_size = max(1, (page_max - page_min) // len(actions))
 
         return zip(
-            actions,
+            actions.astype(bool),
             ((p, p + chunk_size) for p in range(page_min, page_max, chunk_size)),
         )
 
@@ -62,23 +58,28 @@ class NeighborActionSpace(DefaultActionSpace):
         observation, pages, count, t_ddr, t_hbm = args
         if len(pages) == 0:
             return 0
-        action_pages = NeighborActionSpace.match_actions_pages(actions, pages)
+        action_pages = list(NeighborActionSpace.match_actions_pages(actions, pages))
+
         rm_pages = [
             Interval(begin & self._page_mask, end & self._page_mask)
             for a, (begin, end) in action_pages
-            if not a
+            if a == False
         ]
         add_pages = [
             Interval(begin & self._page_mask, end & self._page_mask)
-            for a, (begin, end) in actions_pages
-            if a
+            for a, (begin, end) in action_pages
+            if a == True
         ]
-
-        free_size = memory.free(rm_pages)
-        alloc_size = memory.alloc(add_pages)
-
-        n_free_pages = free_size >> self._page_shift
-        n_alloc_pages = alloc_size >> self._page_shift
+        if len(rm_pages) > 0:
+            free_size = memory.free(rm_pages)
+            n_free_pages = free_size >> self._page_shift
+        else:
+            n_free_pages = 0
+        if len(add_pages) > 0:
+            alloc_size = memory.alloc(add_pages)
+            n_alloc_pages = alloc_size >> self._page_shift
+        else:
+            n_alloc_pages = 0
 
         return self._move_page_cost * (n_free_pages + n_alloc_pages)
 

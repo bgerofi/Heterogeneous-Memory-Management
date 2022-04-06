@@ -18,7 +18,7 @@ class GymEnv(Env):
         preprocessed_file,
         num_actions=128,
         move_page_cost=0.01,
-        hbm_size=1 << 34,
+        hbm_size_MB=1 << 10,
     ):
 
         preprocess_args = Preprocessing.parse_filename(preprocessed_file)
@@ -36,7 +36,7 @@ class GymEnv(Env):
             preprocess_args["interval_distance"],
             preprocess_args["observation_space"],
         )
-        self._hbm_memory = Memory(hbm_size)
+        self._hbm_memory = Memory(capacity=(1 << 20) * hbm_size_MB)
         self.progress_bar = tqdm.tqdm()
         self._reset()
 
@@ -210,10 +210,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     env = GymEnv(
-        args.input,
-        args.num_actions,
-        args.move_page_cost,
-        args.hbm_size << 20,
+        preprocessed_file=args.input,
+        num_actions=args.num_actions,
+        move_page_cost=args.move_page_cost,
+        hbm_size_MB=args.hbm_size,
     )
 
     stop = False
