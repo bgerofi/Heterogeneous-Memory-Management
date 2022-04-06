@@ -119,12 +119,17 @@ class Memory:
         cut = next(i for i, s in enumerate(sizes) if s > available_size)
         non_overlapping = non_overlapping[: cut + 1]
         length = available_size if cut == 0 else available_size - sizes[cut - 1]
-        non_overlapping[-1] = Interval(
-            non_overlapping[-1].begin,
-            non_overlapping[-1].begin + length,
-        )
 
-        self._update_(IntervalTree(non_overlapping))
+        if length > 0:
+            non_overlapping[-1] = Interval(
+                non_overlapping[-1].begin,
+                non_overlapping[-1].begin + length,
+            )
+        else:
+            non_overlapping = non_overlapping[:-1]
+
+        if len(non_overlapping) > 0:
+            self._update_(IntervalTree(non_overlapping))
         return final_alloc_size
 
     def free(self, address_intervals):
