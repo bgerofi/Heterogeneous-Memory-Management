@@ -1,10 +1,8 @@
-from memai import (
-    Estimator,
-    Memory,
-    WindowObservationSpace,
-    NeighborActionSpace,
-    Preprocessing,
-)
+from memai.estimator import Estimator
+from memai.memory import Memory
+from memai.observation import WindowObservationSpace
+from memai.action import NeighborActionSpace
+from memai.preprocessing import Preprocessing
 
 from gym import Env, spaces
 import numpy as np

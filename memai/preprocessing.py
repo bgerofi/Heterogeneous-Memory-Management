@@ -3,12 +3,10 @@ import numpy as np
 import pandas as pd
 import tqdm
 
-from memai import (
-    Estimator,
-    IntervalDetector,
-    WindowIterator,
-    WindowObservationSpace,
-)
+from memai.estimator import Estimator
+from memai.interval import IntervalDetector
+from memai.observation import WindowObservationSpace
+from memai.traces import WindowIterator
 
 """
 This module defines the class used to preprocess a bundle of two
@@ -337,7 +335,7 @@ class Preprocessing:
 
 if __name__ == "__main__":
     import argparse
-    from memai import Trace, TraceSet
+    from memai.traces import Trace, TraceSet
     from memai.options import *
     import sys
     import os

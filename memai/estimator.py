@@ -145,7 +145,7 @@ class Estimator:
 if __name__ == "__main__":
     import time
     import re
-    from memai import Trace, TraceSet
+    from memai.traces import Trace, TraceSet
     from memai.options import *
     from intervaltree import Interval, IntervalTree
     import argparse
