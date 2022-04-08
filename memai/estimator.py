@@ -2,6 +2,12 @@
 import numpy as np
 from memai.traces import WindowIterator
 
+"""
+This module defines the class to evaluate an application execution time
+based on memory access traces, with user defined mapping in the high bandwidth
+memory.
+"""
+
 
 class Estimator:
     """

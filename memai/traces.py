@@ -1,14 +1,16 @@
 import pandas as pd
 import numpy as np
 
+"""
+This module defines abstraction to load and browse traces of memory accesses.
+"""
 
 class Trace:
     """
     Class representing a single trace file.
     The file contains one or several phases and can subseted to one of these.
-    It also be split into windows and subseted to one of these. The window
-    properties are defined by the user, and the metric used for for subsetting
-    is also to be chosen.
+    It can also be split into windows and subseted into one of these.
+    The window size and unit are defined by the user.
     """
 
     TIMESTAMP = "Timestamp"

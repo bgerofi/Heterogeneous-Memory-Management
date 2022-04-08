@@ -7,6 +7,11 @@ import numpy as np
 from memai import Preprocessing, GymEnv
 from memai.options import *
 
+"""
+This script implement a simple AI training and inference with the memai
+gym environment.
+"""
+
 
 class QFunction(torch.nn.Module):
     def __init__(self, obs_shape, n_actions):

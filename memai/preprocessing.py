@@ -10,8 +10,53 @@ from memai import (
     WindowObservationSpace,
 )
 
+"""
+This module defines the class used to preprocess a bundle of two
+traces (TraceSet) of memory access from an application into a trace of
+windows' observations usable by a RL algorithm and associated page accesses
+and execution times in ddr and hbm used to evaluate execution time of the
+window with arbitrary data mapping in HBM.
+
+This files is also a script to perform this preprocessing and store their
+resulting dataframe for later use.
+
+See `memai.observation.WindowObservationSpace`
+See `memai.traces.TraceSet`
+See `memai.estimation.Estimator`
+"""
+
 
 class Preprocessing:
+    """
+    Class representing a set of preprocessed windows of observations, page
+    accesses, execution time in ddr, execution time in hbm.
+    Items of this trace are further fed as input to the RL algorithm and
+    trace estimator to give a feedback to the RL algorithm.
+
+    This class is instanciated as empty and is built iteratively window by
+    window from a `TraceSet`. This whole iteration process is implemented
+    by the constructor method: `from_trace_set()`.
+
+    Observations of this class are a 2 dimension matrix where columns
+    represent timestamps and rows represent addresses.
+    Since the space of addresses accessed by the application can be very large
+    in address values but sparse and narrow in contiguous address ranges,
+    windows are further subdivided into smaller contiguous regions of
+    addresses actually accessed by the application and having their own
+    memory access pattern. Therefore their can be multiple observations,
+    per window in the final preprocessed trace, up to one per accessed
+    contiguous address range.
+
+    This set of contiguous regions is also built incrementally as follow:
+    For each window, the accessed address ranges are added into an interval
+    tree. Added addresses are extended to the left and to the right by a fixed
+    interval distance. When address ranges in the interval tree overlap,
+    they are merged into a single address range. The set of address ranges
+    in the intervaltree after the current window has been processed defines
+    the maximum number of possible observations for the window. If an address
+    range is not accessed by a window it is not added as an observation.
+    """
+
     OBSERVATION = "Observation"
     PAGES = "Pages"
     ACCESSES = "Accesses"
@@ -25,6 +70,21 @@ class Preprocessing:
         page_size=20,
         interval_distance=28,
     ):
+        """
+        Preprocessing constructor, initialized as empty.
+        @arg observation_space: The observation space used to create
+        observations from a list of (address, timestamp).
+        See `memai.observation.WindowObservationSpace`.
+        @arg page_size: The exponent (of a power of two) defining the size of
+        pages. Pages are used as a unit of access. Accessed addresses are
+        converted to a page range where the beginning of the page is the
+        closest smaller address aligned on a page boundary.
+        @arg: interval_distance: The exponent (of a power of two) of the size
+        to append to the left and to the right of addresses accessed to
+        compute the interval tree of accessed memory ranges.
+        See above class description.
+        """
+
         self.observation_space = observation_space
         self.observations = []
         self.pages = []
@@ -57,6 +117,13 @@ class Preprocessing:
         self.windows.append(self._window_index)
 
     def _append_window_(self, window):
+        """
+        Update intervaltree of accessed contiguous address ranges.
+        Split a window into accesses in the accessed contiguous address ranges.
+        For each access range, create an observation and store it along with
+        accessed pages, access count and timing of the window in ddr and hbm.
+        """
+        # IF the window is empty add an empty observation and return.
         if window.is_empty():
             self._append_(
                 self.observation_space.empty(), [], [], window.t_ddr, window.t_ddr
@@ -64,9 +131,13 @@ class Preprocessing:
             self._window_index += 1
             return
 
+        # Collect page addresses of accesses and update intervaltree of
+        # accessed contiguous regions.
         window_pages = window.addresses & self.intervals.page_mask
         self.intervals.append_addresses(window_pages)
 
+        # Iterate through regions of addresses and if they contain accesses
+        # for the current window, create an observation.
         for interval in self.intervals:
             indexes = [interval.contains_point(p) for p in window.addresses]
             if not any(indexes):
@@ -83,6 +154,12 @@ class Preprocessing:
         self._window_index += 1
 
     def as_dict(self):
+        """
+        Convert the current state of the Preprocessing object into a
+        dictionnary.
+        This is mainly used as an intermediate state to convert this object
+        to a pandas dataframe.
+        """
         return {
             Preprocessing.OBSERVATION: [o.flatten() for o in self.observations],
             Preprocessing.PAGES: self.pages,
@@ -93,6 +170,10 @@ class Preprocessing:
         }
 
     def as_pandas(self, output_file=None):
+        """
+        Convert the current state of the Preprocessing object into a
+        pandas dataframe.
+        """
         df = pd.DataFrame(self.as_dict())
         if output_file is not None:
             df.to_feather(output_file)
@@ -107,6 +188,11 @@ class Preprocessing:
         window_len=None,
         observation_space=WindowObservationSpace(128, 128),
     ):
+        """
+        Preprocess a bundle of execution traces (ddr + hbm) into a
+        preprocessing object that can be iterated or stored into a new
+        dataframe.
+        """
         pre = Preprocessing(observation_space, page_size, interval_distance)
         windows = WindowIterator(trace_set, compare_unit, window_len)
         progress_bar = tqdm.tqdm()
@@ -128,6 +214,11 @@ class Preprocessing:
         interval_distance=1 << 28,
         observation_space=WindowObservationSpace(128, 128),
     ):
+        """
+        Read a pandas dataframe of an already preprocessed bundle of traces
+        into a Preprocessing object that can be iterated in a gym environmnent.
+        """
+
         if isinstance(filename, pd.DataFrame):
             df = filename
         elif isinstance(filename, str):
@@ -164,6 +255,12 @@ class Preprocessing:
 
     @staticmethod
     def parse_filename(filename):
+        """
+        Parse the name of a preprocessed trace to retrieve the static
+        parameters of the preprocessing: interval_distance, window_length,
+        page_size, window_unit, observation_rows, observation_columns.
+        """
+
         interval_distance = re.findall("interval_distance=(?P<dist>[0-9]+)", filename)
         if len(interval_distance) == 0:
             raise ValueError("Filename does not contain 'interval_distance' value.")
@@ -216,6 +313,12 @@ class Preprocessing:
         observation_rows,
         observation_columns,
     ):
+        """
+        Create a filename containing the static
+        parameters of a Preprocessing object: interval_distance,
+        window_length, page_size, window_unit, observation_rows,
+        observation_columns.
+        """
         f = ddr_filename.strip(".feather")
         f = f.split("-")
         f = [s for s in f if s not in ["DRAM", "MCDRAM"]]

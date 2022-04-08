@@ -11,6 +11,21 @@ import numpy as np
 from intervaltree import IntervalTree
 import tqdm
 
+"""
+This module provide an OpenAI gym implementation where observations
+are windows of memory accesses (within a specific range of timestamps and
+addresses), and actions are pages allocation/free into/from an high bandwidth
+memory.
+Everytime a page is effectively moved from one memory to another (ddr or hbm)
+a penalty is given as a feedback. The resulting estimated execution time
+for the execution of window is also given as a feedback with the goal of
+minimizing the former.
+
+This script can also be executed to unroll a whole trace of observation
+with basic actions instead of an AI to check that expected behaviors
+of the memory and simulated execution time.
+"""
+
 
 class GymEnv(Env):
     def __init__(
@@ -20,6 +35,20 @@ class GymEnv(Env):
         move_page_cost=0.01,
         hbm_size_MB=1 << 10,
     ):
+        """
+        Instanciate the environment with an already defined observation space
+        from a preprocessed trace and with a custom memory size, move pages
+        penalty and action space.
+
+        @arg preprocessed_file: A trace of preprocessed observations.
+        See `memai.preprocessing.Preprocessing`.
+        @arg num_actions: The number of possible boolean actions the AI
+        can take. To see how it translates to page migrations checkout:
+        `memai.action.NeighborActionSpace`.
+        @arg move_page_cost: Every time a page is moved as a result of an
+        action this value will be subtracted from the RL reward as a penalty.
+        @arg hbm_size_MB: The size of the HBM memory in MiB.
+        """
 
         preprocess_args = Preprocessing.parse_filename(preprocessed_file)
         # Gym specific attributes
@@ -44,11 +73,18 @@ class GymEnv(Env):
         return len(self._preprocessing)
 
     def _reset(self):
+        # memai.memory.Memory
         self._hbm_memory.empty()
+        # { window_index: (t_ddr, t_hbm, estimated_time) }
         self._estimated_times = {}
         self._window_index = 0
         self.move_pages_time = 0.0
+        # memai.preprocessing.Preprocessing
+        # Contains observations and estimation data.
         self._iterator = iter(self._preprocessing)
+        # Used to update memory state before evaluating execution time
+        # with the new observation and compute the associated move_pages
+        # penalty.
         self._previous_input = None
         self.progress_bar.reset(total=len(self._preprocessing))
 
@@ -100,7 +136,7 @@ class GymEnv(Env):
             # window.
             except KeyError:
                 if i > 0:  # skip first iteration.
-                    reward += self._estimate_window()
+                    reward -= self._estimate_window()
                 # Initialize new window.
                 # t_ddr, t_hbm and hbm mappings are not updated with other
                 # observations of the same window since they all share the same.
@@ -124,7 +160,7 @@ class GymEnv(Env):
 
         except StopIteration:
             # Don't forget to estimate last window.
-            reward += self._estimate_window()
+            reward -= self._estimate_window()
             stop = True
             observation = None
             self.progress_bar.update(len(self._preprocessing))

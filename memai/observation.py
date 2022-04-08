@@ -3,14 +3,26 @@ import unittest
 from scipy.ndimage import zoom
 from gym.spaces import Space
 
+"""
+This module defines the observation space for the RL algorithm and
+the method to convert timestamped memory access into an observation.
+"""
+
 
 def slen(s: slice):
     return s.stop - s.start
 
 
 class WindowObservationSpace(Space):
-    def __init__(self, nrows, ncols, seed=None):
+    """
+    This class defines an observation that is a set of timestamped memory
+    access inside a trace window and inside range of addresses.
+    The observation it creates are a matrix of floats representing a
+    fixed size image obtained by zooming in or out the matrix of timestamped
+    memory accesses.
+    """
 
+    def __init__(self, nrows, ncols, seed=None):
         if nrows <= 0 or ncols <= 0:
             raise ValueError("Invalid input. nrows > 0 and ncols > 0.")
 
@@ -25,9 +37,28 @@ class WindowObservationSpace(Space):
         return True
 
     def empty(self):
+        """
+        Return the empty observation (for an empty window).
+        """
         return np.zeros(self.shape, dtype=self.dtype)
 
     def from_sparse_matrix(self, x, y):
+        """
+        Read a sparce matrix where `x` represents timestamps and `y`
+        represents addresses and output a scaled observation matrix.
+
+        `x` and `y` are expected to be lists of positive integers and
+        are scaled such that their minimum value is 1.0.
+
+        A first empty observation matrix is created containing respectively
+        as many rows and columns as the maximum scaled `x` value and the
+        maximum scaled `y` value.
+        For each `(x,y)` pair, the corresponding cell of the matrix is
+        incremented by one.
+
+        The resulting matrix is then zoomed in/out to fit the expected
+        observation shape and returned.
+        """
         x_min = min(i for i in x if i > 0)
         y_min = min(i for i in y if i > 0)
 
@@ -46,6 +77,9 @@ class WindowObservationSpace(Space):
         return zoom(img, (zoom_x, zoom_y))
 
     def sample(self) -> np.ndarray:
+        """
+        Create a random observation.
+        """
         return self.np_random.sample(self.shape, dtype=self.dtype)
 
     def contains(self, x) -> bool:
@@ -184,7 +218,7 @@ class TestObservationSpace(unittest.TestCase):
             *TestObservationSpace.mat_to_coord(input_mat)
         )
         self.assertTrue(all(check_mat.flatten() - output_mat.flatten() < 1e-8))
-        
+
 
 if __name__ == "__main__":
     unittest.main()
