@@ -166,7 +166,7 @@ class NeighborActionSpace(DefaultActionSpace):
 
 class TestNeighborActionSpace(unittest.TestCase):
     def test_match_actions_pages(self):
-        actions = [1, 0, 1, 0, 0]
+        actions = np.array([1, 0, 1, 0, 0], dtype=bool)
         pages = [1, 2, 3]
 
         check = [(1, (0, 1)), (0, (1, 2)), (1, (2, 3)), (0, (3, 4)), (0, (4, 5))]
