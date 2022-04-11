@@ -52,7 +52,20 @@ def add_env_args(parser):
         type=int,
         help="The size of the HBM memory in MiBytes",
     )
-
+    parser.add_argument(
+        "--window-start",
+        metavar="<int>",
+        default=0,
+        type=int,
+        help="The index of the first window of the trace to consider.",
+    )
+    parser.add_argument(
+        "--window-end",
+        metavar="<int>",
+        default=-1,
+        type=int,
+        help="The index of the last window of the trace to consider.",
+    )
 
 def add_window_args(parser):
     parser.add_argument(

@@ -130,6 +130,7 @@ for input_file in args.input:
         args.num_actions,
         args.move_page_cost,
         args.hbm_size,
+        window_subset=(args.window_start, args.window_end),
     )
 
     agent = make_DoubleDQN_agent(env, args.num_actions, args.gpu)

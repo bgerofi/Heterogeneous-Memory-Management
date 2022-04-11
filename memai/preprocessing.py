@@ -96,6 +96,24 @@ class Preprocessing:
     def __len__(self):
         return len(self.observations)
 
+    @property
+    def num_windows(self):
+        return self.windows[-1]
+
+    def iter_window_range(self, from_window, to_window):
+        while to_window < 0:
+            to_window = self.windows[-1] + to_window + 1
+        start = np.searchsorted(self.windows, from_window, side="left")
+        end = np.searchsorted(self.windows, to_window, side="right") + 1
+        return zip(
+            self.observations[start:end],
+            self.pages[start:end],
+            self.accesses[start:end],
+            self.t_ddr[start:end],
+            self.t_hbm[start:end],
+            self.windows[start:end],
+        )
+
     def __iter__(self):
         return zip(
             self.observations,

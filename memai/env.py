@@ -32,6 +32,7 @@ class GymEnv(Env):
         num_actions=128,
         move_page_cost=0.01,
         hbm_size_MB=1 << 10,
+        window_subset=(0, -1),
     ):
         """
         Instanciate the environment with an already defined observation space
@@ -65,6 +66,7 @@ class GymEnv(Env):
         )
         self._hbm_memory = Memory(capacity=(1 << 20) * hbm_size_MB)
         self.progress_bar = tqdm.tqdm()
+        self._window_subset = window_subset
         self._reset()
 
     def __len__(self):
@@ -73,22 +75,35 @@ class GymEnv(Env):
     def _reset(self):
         # memai.memory.Memory
         self._hbm_memory.empty()
-        # { window_index: (t_ddr, t_hbm, estimated_time) }
+        # { window_index: (t_ddr, t_hbm, estimated_time, move_pages_time) }
         self._estimated_times = {}
         self._window_index = 0
-        self.move_pages_time = 0.0
         # memai.preprocessing.Preprocessing
         # Contains observations and estimation data.
-        self._iterator = iter(self._preprocessing)
+        self._iterator = self._preprocessing.iter_window_range(
+            self._window_subset[0], self._window_subset[1]
+        )
         # Used to update memory state before evaluating execution time
         # with the new observation and compute the associated move_pages
         # penalty.
         self._previous_input = None
-        self.progress_bar.reset(total=len(self._preprocessing))
+        self.progress_bar.reset(
+            total=len(
+                list(
+                    self._preprocessing.iter_window_range(
+                        self._window_subset[0], self._window_subset[1]
+                    )
+                )
+            )
+        )
 
     @property
     def estimated_time(self):
         return sum((v[2] for v in self._estimated_times.values() if type(v) == tuple))
+
+    @property
+    def move_pages_time(self):
+        return sum((v[3] for v in self._estimated_times.values() if type(v) == tuple))
 
     @property
     def t_ddr(self):
@@ -110,12 +125,10 @@ class GymEnv(Env):
                 )
             else:
                 move_pages_time = 0
-            reward -= move_pages_time
 
             # Get next window, associated observations and estimation.
             observation, pages, count, t_ddr, t_hbm, i = next(self._iterator)
 
-            self.move_pages_time += move_pages_time
             # If we already encountered the window, we only append pages access
             # for evaluation at the end of the window.
             try:
@@ -125,6 +138,7 @@ class GymEnv(Env):
                 self._estimated_times[i][3] = np.concatenate(
                     (self._estimated_times[i][3], count)
                 )
+                self._estimated_times[i][5] += move_pages_time
             # If this is a new window starting.
             # We estimate the time on the past window and initialize the current
             # window.
@@ -144,6 +158,7 @@ class GymEnv(Env):
                     pages,
                     count,
                     self._hbm_memory._chunks.copy(),
+                    move_pages_time,
                 ]
                 self._window_index = i
             self._previous_input = (observation, pages, count, t_ddr, t_hbm)
@@ -164,12 +179,16 @@ class GymEnv(Env):
 
     def _estimate_window(self):
         i = self._window_index
-        t_ddr, t_hbm, pages, count, intervals = self._estimated_times[i]
+        t_ddr, t_hbm, pages, count, intervals, move_pages_time = self._estimated_times[
+            i
+        ]
         estimated_time = Estimator.estimate_window(
             list(zip(pages, count)), t_ddr, t_hbm, intervals
         )
-        self._estimated_times[i] = (t_ddr, t_hbm, estimated_time)
-        return max([t_ddr, t_hbm]) - estimated_time
+        self._estimated_times[i] = (t_ddr, t_hbm, estimated_time, move_pages_time)
+        reward_window_time = max([t_ddr, t_hbm]) - estimated_time
+
+        return move_pages_time + reward_window_time
 
     def reset(
         self,
@@ -244,6 +263,7 @@ if __name__ == "__main__":
         num_actions=args.num_actions,
         move_page_cost=args.move_page_cost,
         hbm_size_MB=args.hbm_size,
+        window_subset=(args.window_start, args.window_end),
     )
 
     stop = False
