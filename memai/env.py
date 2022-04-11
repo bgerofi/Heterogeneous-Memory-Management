@@ -114,10 +114,6 @@ class GymEnv(Env):
 
             # Get next window, associated observations and estimation.
             observation, pages, count, t_ddr, t_hbm, i = next(self._iterator)
-            pages_access = list(zip(pages, count))
-            estimated_time = Estimator.estimate_window(
-                pages_access, t_ddr, t_hbm, self._hbm_memory._chunks
-            )
 
             self.move_pages_time += move_pages_time
             # If we already encountered the window, we only append pages access

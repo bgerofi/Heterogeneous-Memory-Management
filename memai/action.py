@@ -59,6 +59,7 @@ class DefaultActionSpace(Space):
         ddr memory,
         - t_hbm is the real execution time to perform the accesses in the
         hbm memory.
+        @return Number of pages moved times the cost of moving a page.
         """
         return 0
 
@@ -156,7 +157,7 @@ class NeighborActionSpace(DefaultActionSpace):
         else:
             n_free_pages = 0
         if len(add_pages) > 0:
-            alloc_size = memory.fast_alloc(add_pages)
+            alloc_size = memory.alloc(add_pages)
             n_alloc_pages = alloc_size >> self._page_shift
         else:
             n_alloc_pages = 0
